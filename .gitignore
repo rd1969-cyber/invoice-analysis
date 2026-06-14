@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Database (local dev)
+*.db
+*.sqlite3
+
+# Real customer data — never commit
+samples/invoices/*
+samples/rate_cards/*
+!samples/**/README.md
+uploads/
+
+# Node / frontend
+node_modules/
+.next/
+out/
+
+# Env / secrets
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db

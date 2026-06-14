@@ -1,0 +1,22 @@
+# Web / API
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9   # file uploads
+
+# Data / DB
+SQLAlchemy>=2.0
+pydantic>=2.6
+
+# Parsing (structured first; OCR/AI added in phase 2)
+pdfplumber>=0.11          # text-based PDF extraction
+openpyxl>=3.1             # Excel read/write (also used for report export)
+pandas>=2.2               # CSV/Excel wrangling + analysis
+
+# Testing
+pytest>=8.0
+
+# Optional / phase 2 (commented until needed):
+# psycopg[binary]>=3.1    # Postgres driver for production
+# anthropic>=0.40         # Claude API fallback parser
+# pytesseract             # OCR for scanned PDFs
+# camelot-py[cv]          # table extraction from complex PDFs
