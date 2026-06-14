@@ -23,7 +23,8 @@ from app import brand  # noqa: E402
 from app.analysis.spend import analyze, SpendReport  # noqa: E402
 from app.parsers.ups import UPSParser  # noqa: E402
 from app.rating import fuel as fuelmod  # noqa: E402
-from app.rating.cards import adjust_card, load_card  # noqa: E402
+from app.rating import zones as zonesmod  # noqa: E402
+from app.rating.cards import adjust_card, load_any, load_card  # noqa: E402
 from app.rating.comparison import build_rows, rows_to_records, summarize  # noqa: E402
 from app.reporting.excel import build_workbook  # noqa: E402
 
@@ -91,12 +92,14 @@ def parse_invoices(files: list[tuple[str, bytes]]) -> list:
 
 
 @st.cache_data(show_spinner="Loading rate cards…")
-def load_card_bytes(carrier: str, sheet: str, data: bytes):
-    with tempfile.NamedTemporaryFile(suffix=".xls", delete=False) as tf:
+def load_card_bytes(carrier: str, sheet: str, filename: str, data: bytes):
+    """Load a rate card from uploaded bytes — .xls, .xlsx, or .pdf."""
+    suffix = os.path.splitext(filename)[1].lower() or ".xls"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tf:
         tf.write(data)
         path = tf.name
     try:
-        return load_card(path, sheet, carrier)
+        return load_any(path, carrier, sheet)
     finally:
         os.unlink(path)
 
@@ -195,23 +198,44 @@ with tab_cards:
     cards: dict = {}
     for carrier, glob_part, sheet in DEFAULT_CARDS:
         col1, col2 = st.columns([2, 3])
-        up = col2.file_uploader(f"Replace {carrier} card (.xls)", type=["xls"], key=f"up_{carrier}")
+        up = col2.file_uploader(f"Replace {carrier} rates (Excel or PDF)",
+                                type=["xls", "xlsx", "pdf"], key=f"up_{carrier}")
         card = None
         if up is not None:
-            card = load_card_bytes(carrier, sheet, up.getvalue())
-            col1.success(f"{carrier}: uploaded ({len(card.products)} products)")
+            card = load_card_bytes(carrier, sheet, up.name, up.getvalue())
+            col1.success(f"{carrier}: uploaded {up.name} ({len(card.products)} products)")
         else:
             path = _sample_file(SAMPLES_CARDS, glob_part)
             if path:
-                card = load_card_bytes(carrier, sheet, open(path, "rb").read())
+                card = load_card_bytes(carrier, sheet, os.path.basename(path),
+                                       open(path, "rb").read())
                 col1.info(f"{carrier}: sample card ({len(card.products)} products)")
             else:
                 col1.warning(f"{carrier}: no card found")
         if card is not None:
             cards[carrier] = adjust_card(card, adj.get(carrier, 0.0))
     st.session_state["cards"] = cards
-    st.caption("Note: domestic zones are estimated from destination province (NS origin) until "
-               "carrier FSA→zone charts are loaded. Carrier-specific dimensional weight is applied.")
+
+    st.divider()
+    st.markdown("**Domestic zone charts** (FSA → zone) — exact zones instead of estimates")
+    zonesmod.ZONE_CHARTS.clear()
+    for carrier in ("Canpar", "Purolator"):
+        zc = st.file_uploader(f"{carrier} FSA→zone chart (Excel or PDF)",
+                              type=["xls", "xlsx", "pdf"], key=f"zone_{carrier}")
+        if zc is not None:
+            suffix = os.path.splitext(zc.name)[1].lower()
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tf:
+                tf.write(zc.getvalue())
+                zpath = tf.name
+            try:
+                mapping = zonesmod.load_zone_chart(zpath)
+            finally:
+                os.unlink(zpath)
+            zonesmod.set_chart(carrier, mapping)
+            st.success(f"{carrier}: loaded {len(mapping)} FSA→zone mappings (exact zones now used)")
+        else:
+            st.caption(f"{carrier}: no chart — zone estimated from destination province")
+    st.caption("Carrier-specific dimensional weight is always applied.")
 
 # ---- Tab 3: comparison ---------------------------------------------------- #
 with tab_compare:

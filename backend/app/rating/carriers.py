@@ -61,11 +61,21 @@ def _zone_label(carrier: str, idx: int) -> str:
 
 
 def quote_domestic(s: ShipmentInput, carrier: str, card: RateCardData) -> Quote | None:
-    """Cheapest standard parcel quote for one domestic carrier (or None)."""
-    idx = estimate_domestic_zone_index(s.dest_postal)
-    if idx is None:
-        return None
-    zone = _zone_label(carrier, idx)
+    """Cheapest standard parcel quote for one domestic carrier (or None).
+
+    Uses the carrier's real FSA->zone chart when one has been loaded; otherwise
+    falls back to estimating the zone from the destination province.
+    """
+    from app.rating.zones import resolve_zone
+
+    exact = resolve_zone(carrier, s.dest_postal)
+    if exact is not None:
+        zone, zone_exact = exact, True
+    else:
+        idx = estimate_domestic_zone_index(s.dest_postal)
+        if idx is None:
+            return None
+        zone, zone_exact = _zone_label(carrier, idx), False
 
     best: Quote | None = None
     for prod_name in DOMESTIC_PRODUCTS.get(carrier, []):
@@ -78,13 +88,15 @@ def quote_domestic(s: ShipmentInput, carrier: str, card: RateCardData) -> Quote 
         if base is None:
             continue
         q = Quote(our_carrier=carrier, our_service=prod_name, currency=card.currency)
-        q.add("BASE", f"{carrier} base", base, f"{wnote}; zone {zone}(est); {detail}")
+        ztag = zone if zone_exact else f"{zone}(est)"
+        q.add("BASE", f"{carrier} base", base, f"{wnote}; zone {ztag}; {detail}")
         fr = fuel_rate(carrier, prod_name)
         if fr.pct:
             tag = "" if fr.verified else " [est]"
             q.add("FUEL", "Fuel surcharge", round(base * fr.pct),
                   f"{fr.pct:.2%} of base (eff {fr.effective}){tag}")
-        q.warnings.append(f"Domestic zone {zone} is ESTIMATED from province (no zone chart)")
+        if not zone_exact:
+            q.warnings.append(f"Domestic zone {zone} ESTIMATED from province (no FSA->zone chart)")
         if best is None or q.cost_cents < best.cost_cents:
             best = q
     return best

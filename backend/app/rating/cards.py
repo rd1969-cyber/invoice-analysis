@@ -20,6 +20,7 @@ xlrd false-positive, hence ``ignore_workbook_corruption=True``.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -128,40 +129,51 @@ def adjust_card(card: RateCardData, factor_pct: float) -> RateCardData:
     return out
 
 
-def load_card(path: str, sheet: str, carrier: str = "") -> RateCardData:
-    bk = xlrd.open_workbook(path, ignore_workbook_corruption=True)
-    sh = bk.sheet_by_name(sheet)
-    card = RateCardData(carrier=carrier)
+Grid = list[list]  # rows of cells (str / float / None)
 
+
+def parse_grid(rows: Grid, carrier: str = "", currency: str = "CAD") -> RateCardData:
+    """Parse a normalized grid (from Excel or PDF) into a RateCardData.
+
+    Robust to both single-cell layouts (Excel/PDF tables, where a product name is
+    one cell) and whitespace-split layouts (PDF text, where 'DHL Express - Package'
+    arrives as several cells): product names are re-joined from the row, and the
+    overage / unit triggers scan the whole row's text.
+    """
+    card = RateCardData(carrier=carrier, currency=currency)
     current: Product | None = None
     expect_product = False
     is_overage = False
 
-    for r in range(sh.nrows):
-        row = [sh.cell_value(r, c) for c in range(sh.ncols)]
-        c0 = str(row[0]).strip()
-        low = c0.lower()
+    for row in rows:
+        nonempty = [str(c).strip() for c in row if c is not None and str(c).strip() != ""]
+        if not nonempty:
+            continue
+        c0 = str(row[0]).strip() if row[0] is not None and str(row[0]).strip() != "" else nonempty[0]
+        low0 = c0.lower()
+        rowtext = " ".join(nonempty).lower()
 
-        if low.startswith("prepared"):
+        if low0.startswith("prepared"):
             expect_product = True
             continue
         if expect_product:
-            if c0 and not low.startswith("value"):
-                current = Product(name=c0)
-                card.products[c0] = current
+            if not low0.startswith("value"):
+                name = " ".join(nonempty)
+                current = Product(name=name)
+                card.products[name] = current
                 is_overage = False
                 expect_product = False
             continue
-        if low.startswith("value in"):
+        if low0.startswith("value"):
             continue
-        if low.startswith("weight("):
-            zones = [_zone_label(row[c]) for c in range(1, sh.ncols) if str(row[c]).strip() != ""]
+        if low0.startswith("weight("):
+            zones = [_zone_label(c) for c in row[1:] if c is not None and str(c).strip() != ""]
             if current is not None:
-                current.unit = "kg" if "kg" in low else "lb"
+                current.unit = "kg" if "kg" in low0 else "lb"
                 if not current.zones:
                     current.zones = zones
             continue
-        if "above" in low and ("lb" in low or "kg" in low):
+        if "above" in rowtext and ("lb" in rowtext or "kg" in rowtext):
             is_overage = True
             continue
         if current is not None and _is_num(row[0]):
@@ -175,11 +187,78 @@ def load_card(path: str, sheet: str, carrier: str = "") -> RateCardData:
                 else:
                     current.breakpoints.setdefault(zone, []).append((weight, price))
             continue
-        # any other text (notes) ends an overage run but is otherwise ignored
-        if low.startswith(_SKIP_PREFIXES):
-            continue
 
     for prod in card.products.values():
         for zone in prod.breakpoints:
             prod.breakpoints[zone].sort()
     return card
+
+
+# --------------------------------------------------------------------------- #
+# Format readers -> {sheet_name: Grid}
+# --------------------------------------------------------------------------- #
+def _read_xls(path: str) -> dict[str, Grid]:
+    bk = xlrd.open_workbook(path, ignore_workbook_corruption=True)
+    out: dict[str, Grid] = {}
+    for name in bk.sheet_names():
+        sh = bk.sheet_by_name(name)
+        out[name] = [[sh.cell_value(r, c) for c in range(sh.ncols)] for r in range(sh.nrows)]
+    return out
+
+
+def _read_xlsx(path: str) -> dict[str, Grid]:
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path, read_only=True, data_only=True)
+    out: dict[str, Grid] = {}
+    for ws in wb.worksheets:
+        out[ws.title] = [list(r) for r in ws.iter_rows(values_only=True)]
+    wb.close()
+    return out
+
+
+def _read_pdf(path: str) -> dict[str, Grid]:
+    import pdfplumber
+
+    rows: Grid = []
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables()
+            if tables:
+                for tbl in tables:
+                    for r in tbl:
+                        rows.append([(c if c is not None else "") for c in r])
+            else:  # text fallback: split each line on whitespace
+                for line in (page.extract_text() or "").splitlines():
+                    if line.strip():
+                        rows.append(line.split())
+    return {"PDF": rows}
+
+
+def _pick_sheet(grids: dict[str, Grid], sheet: str | None) -> Grid:
+    if sheet and sheet in grids:
+        return grids[sheet]
+    # Prefer the outbound parcel sheet, then the single-sheet domestic layout.
+    for pref in ("OUTBOUND", "DIFFERENT", "PDF"):
+        if pref in grids:
+            return grids[pref]
+    return next(iter(grids.values())) if grids else []
+
+
+def load_any(path: str, carrier: str = "", sheet: str | None = None) -> RateCardData:
+    """Load a rate card from .xls, .xlsx, or .pdf, auto-selecting the sheet."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".xls":
+        grids = _read_xls(path)
+    elif ext in (".xlsx", ".xlsm"):
+        grids = _read_xlsx(path)
+    elif ext == ".pdf":
+        grids = _read_pdf(path)
+    else:
+        raise ValueError(f"Unsupported rate-card format: {ext} (use .xls, .xlsx, or .pdf)")
+    return parse_grid(_pick_sheet(grids, sheet), carrier=carrier)
+
+
+def load_card(path: str, sheet: str, carrier: str = "") -> RateCardData:
+    """Backwards-compatible .xls loader (now delegates to the grid parser)."""
+    return parse_grid(_pick_sheet(_read_xls(path), sheet), carrier=carrier)
