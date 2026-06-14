@@ -10,7 +10,7 @@ def _row(comp_cents, cost_cents):
     return ComparisonRow(
         tracking="T", service="svc", scope="us_bound_parcel",
         competitor_pays_cents=comp_cents, my_cost_cents=cost_cents,
-        dhl_service="DHL", quote=None,
+        my_carrier="DHL", my_service="svc", quote=None,
     )
 
 

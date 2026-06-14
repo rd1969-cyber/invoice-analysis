@@ -23,8 +23,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.parsers import ParsedInvoice, ParsedShipment
-from app.rating.dhl import quote_dhl
-from app.rating.dhl_card import RateCardData
+from app.rating.cards import RateCardData
+from app.rating.carriers import quote_best
 from app.rating.engine import Quote, ShipmentInput
 
 RED = "\033[31m"
@@ -39,7 +39,8 @@ class ComparisonRow:
     scope: str
     competitor_pays_cents: int
     my_cost_cents: int | None
-    dhl_service: str | None
+    my_carrier: str | None
+    my_service: str | None
     quote: Quote | None
 
     @property
@@ -93,14 +94,19 @@ def _to_input(s: ParsedShipment, scope: str) -> ShipmentInput:
     )
 
 
-def build_rows(invoices: list[ParsedInvoice], card: RateCardData, **kw) -> list[ComparisonRow]:
+def build_rows(invoices: list[ParsedInvoice], cards: dict[str, RateCardData]) -> list[ComparisonRow]:
+    """Build comparison rows, quoting the cheapest carrier for each shipment.
+
+    ``cards`` maps carrier name -> loaded rate card, e.g.
+    {"DHL": ..., "Canpar": ..., "Purolator": ...}.
+    """
     from app.parsers.ups import _classify_scope
 
     rows: list[ComparisonRow] = []
     for inv in invoices:
         for s in inv.shipments:
             scope = _classify_scope(s.dest_postal or "", s.dest_country, s.service or "")
-            q = quote_dhl(_to_input(s, scope), card, **kw)
+            q = quote_best(_to_input(s, scope), cards)
             rows.append(
                 ComparisonRow(
                     tracking=s.tracking_number or "-",
@@ -108,7 +114,8 @@ def build_rows(invoices: list[ParsedInvoice], card: RateCardData, **kw) -> list[
                     scope=scope,
                     competitor_pays_cents=s.total_charge_cents,
                     my_cost_cents=q.cost_cents if q else None,
-                    dhl_service=q.our_service if q else None,
+                    my_carrier=q.our_carrier if q else None,
+                    my_service=q.our_service if q else None,
                     quote=q,
                 )
             )
@@ -132,15 +139,15 @@ def format_table(
 
     serviceable = [r for r in rows if r.serviceable]
     out = [
-        "=" * 100,
-        "RATE COMPARISON & SUGGESTED MARGIN   (competitor = UPS, my carrier = DHL)",
+        "=" * 104,
+        "RATE COMPARISON & SUGGESTED MARGIN   (competitor = UPS; my carriers = Canpar/Purolator/DHL)",
         f"Offer customer {target_customer_savings:.0%} savings vs their current price; "
-        f"floor {min_margin_pct:.0%} margin over my cost.",
+        f"floor {min_margin_pct:.0%} margin over my cost.  Best (cheapest) carrier shown per lane.",
         "RED = my cost is HIGH (can't beat their price).  BLACK = competitive.",
-        "=" * 100,
-        f"{'Tracking':20}{'Scope':16}{'UPS pays':>10}{'My cost':>10}{'Diff':>10}"
-        f"{'Sugg.sell':>10}{'Margin':>10}{'Mgn%':>6}",
-        "-" * 100,
+        "=" * 104,
+        f"{'Tracking':19}{'Scope':14}{'BestCarr':10}{'UPSpays':>9}{'Mycost':>9}{'Diff':>9}"
+        f"{'Sell':>9}{'Margin':>9}{'Mgn%':>6}",
+        "-" * 104,
     ]
     for r in sorted(serviceable, key=lambda x: -(x.difference_cents or 0))[:limit]:
         diff = r.difference_cents
@@ -151,37 +158,50 @@ def format_table(
         else:
             sell_s = margin_s = mpct_s = "-"
         line = (
-            f"{r.tracking:20}{r.scope:16}{m(r.competitor_pays_cents):>10}"
-            f"{m(r.my_cost_cents):>10}{m(diff):>10}{sell_s:>10}{margin_s:>10}{mpct_s:>6}"
+            f"{r.tracking:19}{r.scope:14}{(r.my_carrier or '')[:9]:10}"
+            f"{m(r.competitor_pays_cents):>9}{m(r.my_cost_cents):>9}{m(diff):>9}"
+            f"{sell_s:>9}{margin_s:>9}{mpct_s:>6}"
         )
         out.append(paint(line, r.is_high))
 
     # Portfolio summary
+    from collections import defaultdict
+
     comp = sum(r.competitor_pays_cents for r in serviceable)
     cost = sum(r.my_cost_cents for r in serviceable)
     winnable = [r for r in serviceable if not r.is_high]
-    won_margin = 0
-    won_savings = 0
+    won_margin = won_savings = 0
+    won_by_carrier: dict[str, int] = defaultdict(int)
+    margin_by_carrier: dict[str, int] = defaultdict(int)
     for r in winnable:
         sug = r.suggested(target_customer_savings, min_margin_pct)
         if sug:
             won_margin += sug[1]
             won_savings += sug[3]
+            won_by_carrier[r.my_carrier or "?"] += 1
+            margin_by_carrier[r.my_carrier or "?"] += sug[1]
     n_unserviceable = sum(1 for r in rows if not r.serviceable)
     out += [
-        "-" * 100,
-        f"Serviceable by DHL: {len(serviceable)} shipments "
-        f"(domestic/other not covered: {n_unserviceable})",
+        "-" * 104,
+        f"Serviceable (a carrier rate exists): {len(serviceable)} of {len(rows)} "
+        f"shipments  (no rate: {n_unserviceable})",
         f"Customer pays UPS:   ${comp/100:,.2f}",
-        f"My DHL cost:         ${cost/100:,.2f}   "
-        + paint(f"(I'm {'HIGH' if cost>comp else 'LOW'} overall by ${abs(comp-cost)/100:,.2f})",
+        f"My best cost:        ${cost/100:,.2f}   "
+        + paint(f"(I'm {'HIGH' if cost > comp else 'LOW'} overall by ${abs(comp - cost)/100:,.2f})",
                 cost > comp),
         f"Winnable lanes:      {len(winnable)} of {len(serviceable)}",
+    ]
+    for carr in sorted(won_by_carrier, key=lambda c: -margin_by_carrier[c]):
+        out.append(
+            f"   via {carr:10} {won_by_carrier[carr]:4} lanes   "
+            f"margin ${margin_by_carrier[carr]/100:,.2f}"
+        )
+    out += [
         f"If won @ {target_customer_savings:.0%} customer savings:  "
-        f"customer saves ${won_savings/100:,.2f}, my margin ${won_margin/100:,.2f}",
-        "=" * 100,
-        f"{BOLD}NOTE:{RESET} DHL fuel % and non-US zones are PLACEHOLDERS until you load "
-        "your real DHL fuel rate and zone chart. US-bound numbers are anchored "
-        "(Economy Select N1 = US).",
+        f"customer saves ${won_savings/100:,.2f}, my total margin ${won_margin/100:,.2f}",
+        "=" * 104,
+        f"{BOLD}NOTE:{RESET} fuel % (all carriers) and DOMESTIC zones are PLACEHOLDERS/ESTIMATES "
+        "until real fuel rates + carrier zone charts are loaded. US-bound DHL is anchored "
+        "(Economy Select N1 = US). Carrier-specific DIM weight IS applied.",
     ]
     return "\n".join(out)
