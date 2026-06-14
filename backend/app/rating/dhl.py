@@ -21,9 +21,10 @@ from app.rating.dhl_card import RateCardData
 from app.rating.engine import Quote, ShipmentInput
 
 # --------------------------------------------------------------------------- #
-# >>> PLACEHOLDERS — replace with your real DHL account values <<<
+# Fuel comes from rating/fuel.py (DHL Express ~18.75%, weekly). Zone map below
+# is still a PLACEHOLDER for non-US destinations.
 # --------------------------------------------------------------------------- #
-DHL_FUEL_PCT = 0.27  # PLACEHOLDER: current DHL fuel surcharge (e.g. 0.27 = 27%)
+from app.rating.fuel import fuel_rate  # noqa: E402
 
 # PLACEHOLDER country -> DHL Express Worldwide zone. US is anchored by Economy
 # Select (single-zone N1 = US). The rest need your published DHL zone chart.
@@ -66,7 +67,7 @@ def _candidate_products(scope: str, weight: float) -> list[str]:
 def quote_dhl(
     s: ShipmentInput,
     card: RateCardData,
-    fuel_pct: float = DHL_FUEL_PCT,
+    fuel_override: float | None = None,
     zone_map: dict[str, str] | None = None,
 ) -> Quote | None:
     """Return the cheapest applicable DHL quote, or None if DHL can't serve it."""
@@ -92,9 +93,12 @@ def quote_dhl(
             continue
         q = Quote(our_carrier="DHL", our_service=prod_name, currency=card.currency)
         q.add("BASE", "DHL base", base_cents, f"{wnote}; zone {zone}; {detail}")
-        if fuel_pct:
-            q.add("FUEL", "Fuel surcharge", round(base_cents * fuel_pct),
-                  f"{fuel_pct:.1%} of base [PLACEHOLDER %]")
+        fr = fuel_rate("DHL", prod_name)
+        fpct = fuel_override if fuel_override is not None else fr.pct
+        if fpct:
+            tag = "" if fr.verified else " [est]"
+            q.add("FUEL", "Fuel surcharge", round(base_cents * fpct),
+                  f"{fpct:.2%} of base (eff {fr.effective}){tag}")
         if zone_is_placeholder:
             q.warnings.append(f"Zone {zone} for {s.dest_country} is a PLACEHOLDER")
         if best is None or q.cost_cents < best.cost_cents:

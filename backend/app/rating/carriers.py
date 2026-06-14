@@ -20,15 +20,7 @@ from __future__ import annotations
 from app.rating.cards import RateCardData
 from app.rating.dim import billable_weight_lb
 from app.rating.engine import Quote, ShipmentInput
-
-# --------------------------------------------------------------------------- #
-# >>> PLACEHOLDER fuel surcharges (not present in the rate cards) <<<
-# --------------------------------------------------------------------------- #
-FUEL_PCT: dict[str, float] = {
-    "DHL": 0.27,        # PLACEHOLDER
-    "Purolator": 0.20,  # PLACEHOLDER
-    "Canpar": 0.20,     # PLACEHOLDER
-}
+from app.rating.fuel import fuel_rate
 
 # Standard ground/parcel products to quote per domestic carrier (cheapest wins).
 DOMESTIC_PRODUCTS: dict[str, list[str]] = {
@@ -74,7 +66,6 @@ def quote_domestic(s: ShipmentInput, carrier: str, card: RateCardData) -> Quote 
     if idx is None:
         return None
     zone = _zone_label(carrier, idx)
-    fuel = FUEL_PCT.get(carrier, 0.0)
 
     best: Quote | None = None
     for prod_name in DOMESTIC_PRODUCTS.get(carrier, []):
@@ -88,8 +79,11 @@ def quote_domestic(s: ShipmentInput, carrier: str, card: RateCardData) -> Quote 
             continue
         q = Quote(our_carrier=carrier, our_service=prod_name, currency=card.currency)
         q.add("BASE", f"{carrier} base", base, f"{wnote}; zone {zone}(est); {detail}")
-        if fuel:
-            q.add("FUEL", "Fuel surcharge", round(base * fuel), f"{fuel:.0%} of base [PLACEHOLDER]")
+        fr = fuel_rate(carrier, prod_name)
+        if fr.pct:
+            tag = "" if fr.verified else " [est]"
+            q.add("FUEL", "Fuel surcharge", round(base * fr.pct),
+                  f"{fr.pct:.2%} of base (eff {fr.effective}){tag}")
         q.warnings.append(f"Domestic zone {zone} is ESTIMATED from province (no zone chart)")
         if best is None or q.cost_cents < best.cost_cents:
             best = q

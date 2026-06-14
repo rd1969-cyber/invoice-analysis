@@ -200,8 +200,9 @@ def format_table(
         f"If won @ {target_customer_savings:.0%} customer savings:  "
         f"customer saves ${won_savings/100:,.2f}, my total margin ${won_margin/100:,.2f}",
         "=" * 104,
-        f"{BOLD}NOTE:{RESET} fuel % (all carriers) and DOMESTIC zones are PLACEHOLDERS/ESTIMATES "
-        "until real fuel rates + carrier zone charts are loaded. US-bound DHL is anchored "
-        "(Economy Select N1 = US). Carrier-specific DIM weight IS applied.",
+        f"{BOLD}NOTE:{RESET} Fuel = current published rates (Purolator Express 38%/Ground 27.25% "
+        "verified Jun-2026; DHL 18.75% & Canpar 28% estimated). Carrier-specific DIM weight IS "
+        "applied. Remaining estimate: DOMESTIC zones (from province) pending carrier FSA->zone "
+        "charts. US-bound DHL anchored (Economy Select N1 = US).",
     ]
     return "\n".join(out)
