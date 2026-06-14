@@ -15,6 +15,12 @@ samples/invoices/*
 samples/rate_cards/*
 !samples/**/README.md
 uploads/
+reports/                 # generated reports contain real shipment data
+assets/brand/*.docx      # brand source doc (constants live in app/brand.py)
+assets/brand/media/
+
+# Streamlit
+.streamlit/secrets.toml
 
 # Node / frontend
 node_modules/

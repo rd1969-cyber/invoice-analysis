@@ -122,6 +122,72 @@ def build_rows(invoices: list[ParsedInvoice], cards: dict[str, RateCardData]) ->
     return rows
 
 
+def rows_to_records(
+    rows: list[ComparisonRow],
+    target_customer_savings: float = 0.15,
+    min_margin_pct: float = 0.10,
+) -> list[dict]:
+    """Flatten comparison rows into dicts for tables / DataFrames / Excel.
+
+    Money fields are floats in dollars. ``status`` is 'HIGH' (red) or 'LOW'.
+    Unserviceable shipments are included with status 'NO RATE'.
+    """
+    recs: list[dict] = []
+    for r in rows:
+        rec = {
+            "tracking": r.tracking,
+            "competitor_service": r.service,
+            "scope": r.scope,
+            "competitor_pays": r.competitor_pays_cents / 100,
+            "my_carrier": r.my_carrier or "",
+            "my_service": r.my_service or "",
+            "my_cost": (r.my_cost_cents / 100) if r.serviceable else None,
+            "difference": (r.difference_cents / 100) if r.serviceable else None,
+            "status": "NO RATE" if not r.serviceable else ("HIGH" if r.is_high else "LOW"),
+            "suggested_sell": None,
+            "margin": None,
+            "margin_pct": None,
+            "customer_savings": None,
+        }
+        sug = r.suggested(target_customer_savings, min_margin_pct) if r.serviceable else None
+        if sug:
+            sell, margin, mpct, savings = sug
+            rec.update(
+                suggested_sell=sell / 100,
+                margin=margin / 100,
+                margin_pct=round(mpct, 4),
+                customer_savings=savings / 100,
+            )
+        recs.append(rec)
+    return recs
+
+
+def summarize(records: list[dict]) -> dict:
+    """Portfolio totals from rows_to_records output."""
+    serv = [r for r in records if r["status"] != "NO RATE"]
+    win = [r for r in serv if r["status"] == "LOW"]
+    from collections import defaultdict
+
+    by_carrier_lanes: dict[str, int] = defaultdict(int)
+    by_carrier_margin: dict[str, float] = defaultdict(float)
+    for r in win:
+        if r["margin"]:
+            by_carrier_lanes[r["my_carrier"]] += 1
+            by_carrier_margin[r["my_carrier"]] += r["margin"]
+    return {
+        "shipments": len(records),
+        "serviceable": len(serv),
+        "no_rate": len(records) - len(serv),
+        "winnable": len(win),
+        "competitor_total": sum(r["competitor_pays"] for r in serv),
+        "my_cost_total": sum(r["my_cost"] for r in serv if r["my_cost"] is not None),
+        "total_margin": sum(r["margin"] for r in win if r["margin"]),
+        "total_customer_savings": sum(r["customer_savings"] for r in win if r["customer_savings"]),
+        "by_carrier_lanes": dict(by_carrier_lanes),
+        "by_carrier_margin": dict(by_carrier_margin),
+    }
+
+
 def format_table(
     rows: list[ComparisonRow],
     target_customer_savings: float = 0.15,

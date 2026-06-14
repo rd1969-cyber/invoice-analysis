@@ -12,6 +12,11 @@ pdfplumber>=0.11          # text-based PDF extraction
 openpyxl>=3.1             # Excel read/write (also used for report export)
 pandas>=2.2               # CSV/Excel wrangling + analysis
 
+# UI (Streamlit app)
+streamlit>=1.33
+xlrd>=2.0.1            # legacy .xls rate cards (OLE2)
+python-docx>=1.1       # reading brand guidelines
+
 # Testing
 pytest>=8.0
 

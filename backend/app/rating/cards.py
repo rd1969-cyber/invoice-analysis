@@ -106,6 +106,28 @@ class RateCardData:
         return None
 
 
+def adjust_card(card: RateCardData, factor_pct: float) -> RateCardData:
+    """Return a copy of the card with all base rates scaled by (1 + factor_pct).
+
+    Lets the user nudge a carrier's base rates up/down in the app (e.g. +5% or
+    a negotiated -8%) without re-uploading a file. factor_pct is a fraction,
+    e.g. 0.05 for +5%.
+    """
+    if not factor_pct:
+        return card
+    mult = 1 + factor_pct
+    out = RateCardData(carrier=card.carrier, currency=card.currency)
+    for name, p in card.products.items():
+        np = Product(name=p.name, unit=p.unit, zones=list(p.zones))
+        np.breakpoints = {
+            z: [(w, int(round(c * mult))) for w, c in bps]
+            for z, bps in p.breakpoints.items()
+        }
+        np.overage = {z: int(round(c * mult)) for z, c in p.overage.items()}
+        out.products[name] = np
+    return out
+
+
 def load_card(path: str, sheet: str, carrier: str = "") -> RateCardData:
     bk = xlrd.open_workbook(path, ignore_workbook_corruption=True)
     sh = bk.sheet_by_name(sheet)
