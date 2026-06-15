@@ -205,12 +205,12 @@ with tab_inv:
             acc_rows = [{"Accessorial": ACCESSORIAL_LABELS.get(k, k), "Amount $": v / 100}
                         for k, v in sorted(rep.by_accessorial.items(), key=lambda x: -x[1])]
             acol.caption("By accessorial type")
-            acol.dataframe(pd.DataFrame(acc_rows), use_container_width=True, hide_index=True)
+            acol.dataframe(pd.DataFrame(acc_rows), width="stretch", hide_index=True)
             tax_rows = [{"Tax": k, "Amount $": v / 100}
                         for k, v in sorted(rep.by_tax.items(), key=lambda x: -x[1])]
             tax_rows.append({"Tax": "Total tax", "Amount $": rep.tax_cents / 100})
             tcol.caption("By tax type")
-            tcol.dataframe(pd.DataFrame(tax_rows), use_container_width=True, hide_index=True)
+            tcol.dataframe(pd.DataFrame(tax_rows), width="stretch", hide_index=True)
 
         # Per-shipment detail with every charge component as its own column
         st.caption("Shipment detail — base, each accessorial, and tax broken out")
@@ -237,7 +237,7 @@ with tab_inv:
             col = ACCESSORIAL_LABELS[k] + " $"
             if col in df and df[col].abs().sum() == 0:
                 df = df.drop(columns=[col])
-        st.dataframe(df, use_container_width=True, height=340)
+        st.dataframe(df, width="stretch", height=340)
         st.download_button("⬇ Download shipment detail (CSV)", df.to_csv(index=False).encode(),
                            file_name="freight-iq-shipment-detail.csv", mime="text/csv")
     else:
@@ -324,7 +324,7 @@ with tab_compare:
                 ["tracking", "competitor_service", "my_carrier", "competitor_pays", sell_k, save_k]
             ].rename(columns={"competitor_pays": "current_price", sell_k: "your_price",
                               save_k: "you_save", "my_carrier": "carrier"})
-            st.dataframe(view, use_container_width=True, height=360, hide_index=True)
+            st.dataframe(view, width="stretch", height=360, hide_index=True)
         else:
             cols = ["tracking", "scope", "my_carrier", "competitor_pays", "my_cost", "difference",
                     "status", "beat_sell", "beat_margin", "beat_margin_pct",
@@ -337,7 +337,7 @@ with tab_compare:
                     return [f"color: {brand.MIDNIGHT_BLUE}"] * len(r)
                 return [""] * len(r)
 
-            st.dataframe(df[cols].style.apply(_style, axis=1), use_container_width=True, height=360)
+            st.dataframe(df[cols].style.apply(_style, axis=1), width="stretch", height=360)
             st.caption("RED = my cost is HIGH (can't beat their price).  Dark = competitive.  "
                        "beat_* = beat-competitor pricing · cp_* = cost-plus pricing.")
 
@@ -356,7 +356,7 @@ with tab_compare:
                     out[i] = f"background-color: {brand.SPRING_GREEN}33; font-weight:600"
             return out
 
-        st.dataframe(side.style.apply(_hl_best, axis=1), use_container_width=True, height=300,
+        st.dataframe(side.style.apply(_hl_best, axis=1), width="stretch", height=300,
                      hide_index=True)
         st.caption("Green = cheapest carrier for that lane. Blank cost = carrier doesn't serve "
                    "that lane (e.g. DHL has no domestic product; Canpar/Purolator are domestic only).")

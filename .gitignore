@@ -34,3 +34,7 @@ out/
 # OS
 .DS_Store
 Thumbs.db
+
+# Streamlit run logs
+.streamlit_run.log
+.streamlit_err.log
