@@ -37,7 +37,7 @@ def test_both_pricing_models_present():
     # A: cost $40. Margin 20% -> sell = 40/0.8 = $50, margin $10. Beat -> sell $85.
     recs = rows_to_records(
         [_row("A", 10000, 4000)], target_customer_savings=0.15,
-        min_margin_pct=0.10, target_margin=0.20,
+        min_margin_pct=0.10, margins=0.20,
     )
     r = recs[0]
     assert r["beat_sell"] == 85.0

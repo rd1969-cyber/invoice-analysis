@@ -40,3 +40,31 @@ def test_margin_model_is_percent_of_sell():
     assert margin == 2000        # 8000 - 6000
     assert round(mpct, 4) == 0.25
     assert savings == 2000       # 10000 - 8000
+
+
+def test_per_component_margin_uses_quote_line_items():
+    from app.rating.engine import Quote
+    q = Quote(our_carrier="Purolator", our_service="Ground", currency="CAD")
+    q.add("BASE", "Base", 5000)          # $50 base
+    q.add("FUEL", "Fuel", 1000)          # $10 fuel
+    q.add("RESI", "Residential", 500)    # $5 residential
+    r = ComparisonRow("T", "svc", "domestic_parcel", 10000, q.cost_cents,
+                      "Purolator", "Ground", q, {"Purolator": q.cost_cents})
+    # base 30%, fuel 20%, residential 50%
+    margins = {"base": 0.30, "fuel": 0.20, "residential": 0.50, "default": 0.0}
+    sell, margin, mpct, _ = r.margin_price(margins)
+    # 5000/0.7=7143 + 1000/0.8=1250 + 500/0.5=1000 = 9393
+    assert sell == round(5000 / 0.7) + round(1000 / 0.8) + round(500 / 0.5)
+    assert margin == sell - q.cost_cents
+
+
+def test_applicable_components_from_shipment():
+    from app.rating.accessorials import applicable_components
+    s = ParsedShipment(tracking_number="X", accessorials=[
+        {"type": "residential", "amount_cents": 505, "desc": "r"},
+        {"type": "signature", "amount_cents": 600, "desc": "s"},
+        {"type": "fuel", "amount_cents": 100, "desc": "f"},  # not an accessorial component
+    ])
+    comps = applicable_components(s)
+    assert "residential" in comps and "adult_signature" in comps
+    assert "fuel" not in comps

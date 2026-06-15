@@ -150,9 +150,17 @@ with st.sidebar:
     st.caption("Pricing — both models run; pick which drives the customer report")
     target_savings = st.slider("Beat model: customer savings vs their price", 0, 40, 15, 1) / 100
     min_margin = st.slider("Beat model: minimum margin floor", 0, 40, 10, 1) / 100
-    target_margin = st.slider("Margin model: target gross margin (% of sell)", 0, 80, 20, 1) / 100
+    st.caption("Margin model: margin % per component (% of sell price)")
+    from app.rating.accessorials import COMPONENTS, COMPONENT_LABELS  # noqa: E402
+    margins = {}
+    with st.expander("Per-component margins", expanded=True):
+        for comp in COMPONENTS:
+            margins[comp] = st.number_input(f"{COMPONENT_LABELS[comp]} margin %", 0, 90, 25, 1,
+                                            key=f"mgn_{comp}") / 100
+        margins["default"] = st.number_input("Other / default margin %", 0, 90, 25, 1,
+                                             key="mgn_default") / 100
     pricing_basis = st.radio("Customer-report price basis", ["beat", "margin"],
-                             format_func=lambda b: "Beat competitor" if b == "beat" else "Target margin")
+                             format_func=lambda b: "Beat competitor" if b == "beat" else "Margin")
 
     st.caption("Fuel surcharges (current published — editable)")
     fuel_inputs = {}
@@ -349,6 +357,26 @@ with tab_cards:
                        file_name="manual-cost-template.csv", mime="text/csv")
     st.session_state["manual_costs"] = manual_costs
 
+    st.divider()
+    st.markdown("**Accessorial fees** ($ your carriers charge you) — pulled defaults, editable")
+    st.caption("Applied to a shipment when the competitor invoice shows that accessorial. "
+               "Each gets its own margin (sidebar). Edit to match your reseller fees.")
+    from app.rating import accessorials as accmod  # noqa: E402
+    fee_carriers = [c for c in (*cards.keys(),) if c in accmod.FEES] or list(accmod.FEES)
+    fee_df = pd.DataFrame({
+        accmod.COMPONENT_LABELS[comp]: {c: accmod.FEES.get(c, {}).get(comp, 0) / 100
+                                        for c in fee_carriers}
+        for comp in accmod.ACCESSORIAL_COMPONENTS
+    })
+    edited = st.data_editor(fee_df, width="stretch", key="acc_fees")
+    # write edits back to the module (cents)
+    for carrier in edited.index:
+        for comp in accmod.ACCESSORIAL_COMPONENTS:
+            label = accmod.COMPONENT_LABELS[comp]
+            val = edited.loc[carrier, label]
+            if pd.notna(val):
+                accmod.FEES.setdefault(carrier, {})[comp] = int(round(float(val) * 100))
+
 # ---- Tab 3: comparison ---------------------------------------------------- #
 with tab_compare:
     st.subheader("Rate comparison & suggested margin")
@@ -361,7 +389,7 @@ with tab_compare:
     else:
         manual_costs = st.session_state.get("manual_costs") or {}
         rows = build_rows(invoices, cards, manual_costs)
-        records = rows_to_records(rows, target_savings, min_margin, target_margin)
+        records = rows_to_records(rows, target_savings, min_margin, margins)
         summary = summarize(records)
         if manual_costs:
             st.caption(f"Using {len(manual_costs)} manual cost override(s) from tab 2.")
@@ -378,7 +406,7 @@ with tab_compare:
         k1.metric("Winnable lanes", f"{summary['winnable']} / {summary['serviceable']}")
         k2.metric("Competitor spend", f"${summary['competitor_total']:,.0f}")
         k3.metric("Margin · beat model", f"${summary['total_margin']:,.0f}")
-        k4.metric(f"Margin · {target_margin:.0%} margin", f"${summary['margin_total_margin']:,.0f}")
+        k4.metric("Margin · margin model", f"${summary['margin_total_margin']:,.0f}")
         k5.metric("Customer savings · beat", f"${summary['total_customer_savings']:,.0f}")
         if summary["by_carrier_margin"]:
             st.caption("Winnable by carrier (beat model): " + "  ·  ".join(
@@ -432,7 +460,7 @@ with tab_compare:
                    "that lane (e.g. DHL has no domestic product; Canpar/Purolator are domestic only).")
 
         settings = {"target_customer_savings": target_savings, "min_margin_pct": min_margin,
-                    "target_margin": target_margin, "pricing_basis": pricing_basis}
+                    "pricing_basis": pricing_basis}
         xlsx = build_workbook(records, summary, report_mode, settings)
         st.download_button(
             f"⬇ Download {report_mode} report (Excel) — "

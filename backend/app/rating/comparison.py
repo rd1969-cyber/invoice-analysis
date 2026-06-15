@@ -83,19 +83,33 @@ class ComparisonRow:
         savings = self.competitor_pays_cents - sell
         return sell, margin, margin_pct, savings
 
-    def margin_price(self, target_margin: float):
-        """Margin pricing: price so gross margin = target_margin (% of SELL).
+    def margin_price(self, margins):
+        """Margin pricing, per component: price each cost line so its gross margin
+        equals the component's target margin (% of SELL), then sum.
 
-        sell = cost / (1 - target_margin)  =>  margin$ = sell * target_margin.
-        (This differs from cost-plus markup, which is a % of COST.)
+        ``margins`` is either a single % (applied to everything) or a dict like
+        {"base": .3, "fuel": .2, "residential": .5, ..., "default": .25}.
+        Each component: sell_i = cost_i / (1 - margin_i). Falls back to a single
+        margin on total cost when there's no itemized quote (e.g. manual cost).
         Returns (sell, margin, margin_pct, customer_savings) in cents, or None.
-        customer_savings = competitor price - sell; can be negative if the margin
-        price lands ABOVE the customer's current price.
         """
+        from app.rating.accessorials import CODE_COMPONENT, normalize_margins
+
         if self.my_cost_cents is None:
             return None
-        tm = min(max(target_margin, 0.0), 0.95)
-        sell = round(self.my_cost_cents / (1 - tm))
+        m = normalize_margins(margins)
+        default = m.get("default", 0.0)
+
+        def _clamp(x):
+            return min(max(x, 0.0), 0.95)
+
+        if self.quote and self.quote.line_items:
+            sell = 0
+            for li in self.quote.line_items:
+                comp = CODE_COMPONENT.get(li.code, "default")
+                sell += round(li.amount_cents / (1 - _clamp(m.get(comp, default))))
+        else:
+            sell = round(self.my_cost_cents / (1 - _clamp(default)))
         margin = sell - self.my_cost_cents
         margin_pct = margin / sell if sell else 0.0
         savings = self.competitor_pays_cents - sell
@@ -131,6 +145,7 @@ def build_rows(
     to override the computed cost (manual costing / carriers with no rate card).
     """
     from app.parsers.ups import _classify_scope
+    from app.rating.accessorials import applicable_components
     from app.rating.carriers import quote_all
 
     def _zone_basis(q):
@@ -144,7 +159,8 @@ def build_rows(
     for inv in invoices:
         for s in inv.shipments:
             scope = _classify_scope(s.dest_postal or "", s.dest_country, s.service or "")
-            quotes = quote_all(_to_input(s, scope), cards)
+            acc = applicable_components(s)
+            quotes = quote_all(_to_input(s, scope), cards, acc)
             carrier_costs = {q.our_carrier: q.cost_cents for q in quotes}
             best = min(quotes, key=lambda q: q.cost_cents) if quotes else None
             my_cost = best.cost_cents if best else None
@@ -226,7 +242,7 @@ def rows_to_records(
     rows: list[ComparisonRow],
     target_customer_savings: float = 0.15,
     min_margin_pct: float = 0.10,
-    target_margin: float = 0.20,
+    margins=0.20,
 ) -> list[dict]:
     """Flatten comparison rows into dicts for tables / DataFrames / Excel.
 
@@ -268,8 +284,8 @@ def rows_to_records(
             rec.update(beat_sell=sell / 100, beat_margin=margin / 100,
                        beat_margin_pct=round(mpct, 4), beat_savings=savings / 100)
 
-        # margin model
-        mg = r.margin_price(target_margin) if r.serviceable else None
+        # margin model (per-component)
+        mg = r.margin_price(margins) if r.serviceable else None
         rec["mgn_sell"] = rec["mgn_margin"] = rec["mgn_margin_pct"] = rec["mgn_savings"] = None
         if mg:
             sell, margin, mpct, savings = mg

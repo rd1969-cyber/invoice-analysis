@@ -43,6 +43,8 @@ def register_domestic_carrier(name: str, products: list[str] | None = None,
     dim_divisor / fuel_pct: optional carrier overrides (else DIM=139, fuel=0).
     """
     DOMESTIC_CARRIERS[name] = {"products": products or [], "zone_prefix": zone_prefix}
+    from app.rating.accessorials import ACCESSORIAL_COMPONENTS, FEES
+    FEES.setdefault(name, {c: 0 for c in ACCESSORIAL_COMPONENTS})
     if dim_divisor:
         from app.rating.dim import DIM_DIVISORS
         DIM_DIVISORS.setdefault(name, {})["_default"] = dim_divisor
@@ -83,11 +85,14 @@ def _zone_label(carrier: str, idx: int) -> str:
     return f"{prefix}{idx:02d}" if prefix else str(idx)
 
 
-def quote_domestic(s: ShipmentInput, carrier: str, card: RateCardData) -> Quote | None:
+def quote_domestic(s: ShipmentInput, carrier: str, card: RateCardData,
+                   accessorials: list[str] = ()) -> Quote | None:
     """Cheapest standard parcel quote for one domestic carrier (or None).
 
     Uses the carrier's real FSA->zone chart when one has been loaded; otherwise
     falls back to estimating the zone from the destination province.
+    ``accessorials`` lists applicable accessorial components (residential, etc.)
+    whose carrier fees are added as their own line items.
     """
     from app.rating.zones import resolve_zone
 
@@ -123,19 +128,32 @@ def quote_domestic(s: ShipmentInput, carrier: str, card: RateCardData) -> Quote 
                   f"{fr.pct:.2%} of base (eff {fr.effective}){tag}")
         if not zone_exact:
             q.warnings.append(f"Domestic zone {zone} ESTIMATED from province (no FSA->zone chart)")
+        _add_accessorials(q, carrier, accessorials)
         if best is None or q.cost_cents < best.cost_cents:
             best = q
     return best
 
 
-def quote_all(s: ShipmentInput, cards: dict[str, RateCardData]) -> list[Quote]:
+def _add_accessorials(q: Quote, carrier: str, components) -> None:
+    """Append carrier accessorial fees as their own line items."""
+    from app.rating.accessorials import COMPONENT_CODE, COMPONENT_LABELS, fee
+
+    for comp in components or ():
+        cents = fee(carrier, comp)
+        if cents:
+            q.add(COMPONENT_CODE.get(comp, "OTHER"), COMPONENT_LABELS.get(comp, comp),
+                  cents, f"{carrier} {comp} accessorial fee")
+
+
+def quote_all(s: ShipmentInput, cards: dict[str, RateCardData],
+              accessorials: list[str] = ()) -> list[Quote]:
     """Every applicable carrier's quote for this shipment (not just the cheapest)."""
     candidates: list[Quote] = []
     if s.scope == "domestic_parcel":
         for carrier in DOMESTIC_CARRIERS:
             card = cards.get(carrier)
             if card is not None:
-                q = quote_domestic(s, carrier, card)
+                q = quote_domestic(s, carrier, card, accessorials)
                 if q is not None:
                     candidates.append(q)
     elif s.scope in ("us_bound_parcel", "international"):
@@ -145,11 +163,13 @@ def quote_all(s: ShipmentInput, cards: dict[str, RateCardData]) -> list[Quote]:
         if card is not None:
             q = quote_dhl(s, card)
             if q is not None:
+                _add_accessorials(q, "DHL", accessorials)
                 candidates.append(q)
     return candidates
 
 
-def quote_best(s: ShipmentInput, cards: dict[str, RateCardData]) -> Quote | None:
+def quote_best(s: ShipmentInput, cards: dict[str, RateCardData],
+               accessorials: list[str] = ()) -> Quote | None:
     """Best (cheapest) quote across all applicable carriers for this shipment."""
-    candidates = quote_all(s, cards)
+    candidates = quote_all(s, cards, accessorials)
     return min(candidates, key=lambda q: q.cost_cents) if candidates else None
