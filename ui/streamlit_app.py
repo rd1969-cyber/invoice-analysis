@@ -24,8 +24,12 @@ from app.analysis.spend import (  # noqa: E402
     ACCESSORIAL_COLUMNS, ACCESSORIAL_LABELS, analyze, SpendReport, shipment_breakdown,
 )
 from app.parsers.ups import UPSParser  # noqa: E402
+from app.rating import carriers as carriersmod  # noqa: E402
 from app.rating import fuel as fuelmod  # noqa: E402
 from app.rating import zones as zonesmod  # noqa: E402
+from app.rating.carriers import register_domestic_carrier  # noqa: E402
+
+BUILTIN_DOMESTIC = ("Canpar", "Purolator")
 from app.rating.cards import adjust_card, load_any, load_card  # noqa: E402
 from app.rating.comparison import (  # noqa: E402
     build_rows, parse_manual_costs, rows_to_records, summarize,
@@ -270,12 +274,38 @@ with tab_cards:
                 col1.warning(f"{carrier}: no card found")
         if card is not None:
             cards[carrier] = adjust_card(card, adj.get(carrier, 0.0))
+
+    # ---- Add another carrier (e.g. FedEx, Freightcom) ---- #
+    st.divider()
+    st.markdown("**Add another carrier** — upload any domestic carrier's rate card")
+    # Reset previously-registered extra carriers so removals take effect.
+    for extra in [c for c in carriersmod.DOMESTIC_CARRIERS if c not in BUILTIN_DOMESTIC]:
+        del carriersmod.DOMESTIC_CARRIERS[extra]
+    n_extra = st.number_input("Number of additional carriers", 0, 6, 0, 1)
+    for i in range(int(n_extra)):
+        st.caption(f"Additional carrier #{i + 1}")
+        cc = st.columns([2, 2, 1, 1, 1])
+        name = cc[0].text_input("Name", key=f"xc_name_{i}", placeholder="e.g. FedEx")
+        up = cc[1].file_uploader("Rate card (Excel/PDF)", type=["xls", "xlsx", "pdf"],
+                                 key=f"xc_file_{i}")
+        zprefix = cc[2].text_input("Zone prefix", key=f"xc_prefix_{i}", value="",
+                                   help="Blank = numeric zones 1..n; 'D' = D01..Dnn")
+        dimdiv = cc[3].number_input("DIM ÷", 100.0, 200.0, 139.0, 1.0, key=f"xc_dim_{i}")
+        xfuel = cc[4].number_input("Fuel %", 0.0, 80.0, 0.0, 0.25, key=f"xc_fuel_{i}") / 100
+        if name and up is not None:
+            xcard = load_card_bytes(name, None, up.name, up.getvalue())
+            prods = st.multiselect(f"{name}: products to quote (blank = all)",
+                                   list(xcard.products), key=f"xc_prods_{i}")
+            register_domestic_carrier(name, prods or None, zprefix.strip(), dimdiv, xfuel)
+            cards[name] = adjust_card(xcard, adj.get(name, 0.0))
+            st.success(f"{name}: registered ({len(xcard.products)} products in card)")
+
     st.session_state["cards"] = cards
 
     st.divider()
     st.markdown("**Domestic zone charts** (FSA → zone) — exact zones instead of estimates")
     zonesmod.ZONE_CHARTS.clear()
-    for carrier in ("Canpar", "Purolator"):
+    for carrier in list(carriersmod.DOMESTIC_CARRIERS):
         zc = st.file_uploader(f"{carrier} FSA→zone chart (Excel or PDF)",
                               type=["xls", "xlsx", "pdf"], key=f"zone_{carrier}")
         if zc is not None:
@@ -383,7 +413,7 @@ with tab_compare:
 
         # ---- All carriers side by side ---- #
         st.markdown("**All carriers side by side** — every carrier's cost per lane (cheapest wins)")
-        carrier_cols = [f"{c}_cost" for c in ("Purolator", "Canpar", "DHL")]
+        carrier_cols = [c for c in df.columns if c.endswith("_cost") and c != "my_cost"]
         side = df[["tracking", "scope", "zone_basis", "competitor_pays", *carrier_cols,
                    "my_carrier", "my_cost"]].rename(columns={"competitor_pays": "UPS_pays",
                                                              "my_carrier": "cheapest"})

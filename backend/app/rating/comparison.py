@@ -237,6 +237,10 @@ def rows_to_records(
     and each carrier's cost side by side (``Purolator_cost`` etc.).
     ``suggested_*`` mirror the beat model for backward compatibility.
     """
+    # Carrier cost columns: standard order first, then any extra carriers seen.
+    seen = {c for r in rows for c in r.carrier_costs}
+    carriers = [c for c in ALL_CARRIERS if c in seen] + sorted(seen - set(ALL_CARRIERS))
+
     recs: list[dict] = []
     for r in rows:
         rec = {
@@ -252,7 +256,7 @@ def rows_to_records(
             "zone_basis": r.zone_basis,
         }
         # per-carrier costs side by side
-        for carrier in ALL_CARRIERS:
+        for carrier in carriers:
             c = r.carrier_costs.get(carrier)
             rec[f"{carrier}_cost"] = (c / 100) if c is not None else None
 

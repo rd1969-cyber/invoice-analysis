@@ -22,11 +22,33 @@ from app.rating.dim import billable_weight_lb
 from app.rating.engine import Quote, ShipmentInput
 from app.rating.fuel import fuel_rate
 
-# Standard ground/parcel products to quote per domestic carrier (cheapest wins).
-DOMESTIC_PRODUCTS: dict[str, list[str]] = {
-    "Canpar": ["Ground Single", "Express Parcel Single", "Select Parcel Single"],
-    "Purolator": ["Purolator Ground", "Purolator Express"],
+# Registry of domestic carriers. Each entry: which products to quote (cheapest
+# wins; [] = quote every product in the card) and the zone-label prefix the card
+# uses ("" = numeric 1..n, "D" = D01..Dnn, etc.). New carriers can be added at
+# runtime via register_domestic_carrier() (used by the app's "add carrier" UI).
+DOMESTIC_CARRIERS: dict[str, dict] = {
+    "Canpar": {"products": ["Ground Single", "Express Parcel Single", "Select Parcel Single"],
+               "zone_prefix": ""},
+    "Purolator": {"products": ["Purolator Ground", "Purolator Express"], "zone_prefix": "D"},
 }
+
+
+def register_domestic_carrier(name: str, products: list[str] | None = None,
+                              zone_prefix: str = "", dim_divisor: float | None = None,
+                              fuel_pct: float | None = None) -> None:
+    """Register an additional domestic carrier so it gets quoted like the built-ins.
+
+    products: product names in the card to quote (None/[] = quote them all).
+    zone_prefix: how the card labels zones ("" numeric, "D" for D01.., etc.).
+    dim_divisor / fuel_pct: optional carrier overrides (else DIM=139, fuel=0).
+    """
+    DOMESTIC_CARRIERS[name] = {"products": products or [], "zone_prefix": zone_prefix}
+    if dim_divisor:
+        from app.rating.dim import DIM_DIVISORS
+        DIM_DIVISORS.setdefault(name, {})["_default"] = dim_divisor
+    if fuel_pct is not None:
+        from app.rating.fuel import FUEL, FuelRate
+        FUEL[(name, "ground")] = FuelRate(fuel_pct, "user-entered", "app", False)
 
 # --------------------------------------------------------------------------- #
 # >>> PLACEHOLDER domestic zone estimation (origin = NS / Atlantic Canada) <<<
@@ -57,7 +79,8 @@ def estimate_domestic_zone_index(dest_postal: str | None) -> int | None:
 
 
 def _zone_label(carrier: str, idx: int) -> str:
-    return f"D{idx:02d}" if carrier == "Purolator" else str(idx)
+    prefix = DOMESTIC_CARRIERS.get(carrier, {}).get("zone_prefix", "")
+    return f"{prefix}{idx:02d}" if prefix else str(idx)
 
 
 def quote_domestic(s: ShipmentInput, carrier: str, card: RateCardData) -> Quote | None:
@@ -77,8 +100,11 @@ def quote_domestic(s: ShipmentInput, carrier: str, card: RateCardData) -> Quote 
             return None
         zone, zone_exact = _zone_label(carrier, idx), False
 
+    # Configured products, or every product in the card if none specified.
+    product_names = DOMESTIC_CARRIERS.get(carrier, {}).get("products") or list(card.products)
+
     best: Quote | None = None
-    for prod_name in DOMESTIC_PRODUCTS.get(carrier, []):
+    for prod_name in product_names:
         prod = card.get(prod_name)
         if prod is None:
             continue
@@ -106,7 +132,7 @@ def quote_all(s: ShipmentInput, cards: dict[str, RateCardData]) -> list[Quote]:
     """Every applicable carrier's quote for this shipment (not just the cheapest)."""
     candidates: list[Quote] = []
     if s.scope == "domestic_parcel":
-        for carrier in ("Canpar", "Purolator"):
+        for carrier in DOMESTIC_CARRIERS:
             card = cards.get(carrier)
             if card is not None:
                 q = quote_domestic(s, carrier, card)
