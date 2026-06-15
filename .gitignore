@@ -17,7 +17,7 @@ samples/rate_cards/*
 uploads/
 reports/                 # generated reports contain real shipment data
 assets/brand/*.docx      # brand source doc (constants live in app/brand.py)
-assets/brand/media/
+# Logos ARE committed (app needs them); only ignore other extracted media.
 
 # Streamlit
 .streamlit/secrets.toml

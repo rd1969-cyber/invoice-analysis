@@ -44,7 +44,24 @@ st.set_page_config(page_title=f"{brand.APP_NAME} — InXpress", page_icon="📦"
 # --------------------------------------------------------------------------- #
 # Branding
 # --------------------------------------------------------------------------- #
+def _logo_data_uri(on_dark: bool = True) -> str | None:
+    import base64
+
+    path = brand.logo_path(on_dark=on_dark)
+    if not path:
+        return None
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    return f"data:image/png;base64,{b64}"
+
+
 def inject_brand_css() -> None:
+    logo = _logo_data_uri(on_dark=True)
+    # Official white logo on the dark header; fall back to a wordmark if missing.
+    logo_html = (
+        f'<img src="{logo}" alt="InXpress" style="height:34px;"/>' if logo
+        else '<span class="fiq-logo">In<span class="x">X</span>press</span>'
+    )
     st.markdown(
         f"""
         <style>
@@ -52,8 +69,9 @@ def inject_brand_css() -> None:
         html, body, [class*="css"] {{ font-family: '{brand.BODY_FONT}', sans-serif; }}
         h1, h2, h3 {{ font-family: '{brand.HEADLINE_FONT}', sans-serif;
                       color: {brand.MIDNIGHT_BLUE}; letter-spacing: -0.01em; }}
-        .fiq-header {{ background:{brand.MIDNIGHT_BLUE}; padding:18px 24px; border-radius:10px;
-                       display:flex; align-items:center; justify-content:space-between; }}
+        .fiq-header {{ background:{brand.MIDNIGHT_BLUE}; padding:16px 24px; border-radius:10px;
+                       display:flex; align-items:center; justify-content:space-between; gap:18px; }}
+        .fiq-left {{ display:flex; align-items:center; gap:14px; }}
         .fiq-logo {{ font-family:'{brand.HEADLINE_FONT}',sans-serif; font-weight:700;
                      font-size:26px; color:#fff; }}
         .fiq-logo .x {{ color:{brand.SPRING_GREEN}; }}
@@ -64,8 +82,8 @@ def inject_brand_css() -> None:
         [data-testid="stMetricValue"] {{ color:{brand.MIDNIGHT_BLUE}; }}
         </style>
         <div class="fiq-header">
-          <div><span class="fiq-logo">In<span class="x">X</span>press</span>
-               <span class="fiq-sub"> &nbsp;·&nbsp; {brand.APP_NAME} — {brand.APP_TAGLINE}</span></div>
+          <div class="fiq-left">{logo_html}
+               <span class="fiq-sub">{brand.APP_NAME} — {brand.APP_TAGLINE}</span></div>
           <div class="fiq-sub">{brand.CONTACT['business_name']} · {brand.CONTACT['phone']}</div>
         </div>
         """,

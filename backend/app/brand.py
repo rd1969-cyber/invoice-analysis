@@ -52,3 +52,17 @@ CONTACT = {
 
 APP_NAME = "Freight IQ"
 APP_TAGLINE = "Invoice intelligence & rate comparison"
+
+# Official logo files (committed under assets/brand/media).
+import os as _os
+
+_ROOT = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", ".."))
+_MEDIA = _os.path.join(_ROOT, "assets", "brand", "media")
+LOGO_WHITE_PATH = _os.path.join(_MEDIA, "InXpress-Logo-White.png")  # for dark backgrounds
+LOGO_BLUE_PATH = _os.path.join(_MEDIA, "InXpress-Logo-Blue.png")    # for light backgrounds
+
+
+def logo_path(on_dark: bool = True) -> str | None:
+    """Return the brand-correct logo for the background, or None if missing."""
+    p = LOGO_WHITE_PATH if on_dark else LOGO_BLUE_PATH
+    return p if _os.path.exists(p) else None

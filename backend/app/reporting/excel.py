@@ -34,21 +34,36 @@ _PCT = "0%"
 
 
 def _title_block(ws, title: str, mode: str, settings: dict) -> int:
-    ws.merge_cells("A1:F1")
-    ws["A1"] = f"{brand.APP_NAME} — {title}"
-    ws["A1"].font = Font(name="Calibri", bold=True, color="FFFFFF", size=16)
-    ws["A1"].fill = _HEADER_FILL
-    ws["A1"].alignment = Alignment(vertical="center", indent=1)
-    ws.row_dimensions[1].height = 30
+    # Blue logo on white (brand: blue logo on light backgrounds), above the band.
+    logo = brand.logo_path(on_dark=False)
+    base = 1
+    if logo:
+        try:
+            from openpyxl.drawing.image import Image as XLImage
 
-    ws.merge_cells("A2:F2")
+            img = XLImage(logo)
+            img.width, img.height = 200, 41  # keep 1000x206 aspect
+            ws.add_image(img, "A1")
+            ws.row_dimensions[1].height = 34
+            base = 2
+        except Exception:
+            base = 1
+
+    ws.merge_cells(f"A{base}:F{base}")
+    ws[f"A{base}"] = f"{brand.APP_NAME} — {title}"
+    ws[f"A{base}"].font = Font(name="Calibri", bold=True, color="FFFFFF", size=16)
+    ws[f"A{base}"].fill = _HEADER_FILL
+    ws[f"A{base}"].alignment = Alignment(vertical="center", indent=1)
+    ws.row_dimensions[base].height = 30
+
     c = brand.CONTACT
-    ws["A2"] = f"{c['business_name']}  |  {c['email']}  |  {c['phone']}"
-    ws["A2"].font = Font(name="Calibri", color="FFFFFF", size=9)
-    ws["A2"].fill = PatternFill("solid", fgColor=_GREEN)
-    ws.row_dimensions[2].height = 16
+    ws.merge_cells(f"A{base+1}:F{base+1}")
+    ws[f"A{base+1}"] = f"{c['business_name']}  |  {c['email']}  |  {c['phone']}"
+    ws[f"A{base+1}"].font = Font(name="Calibri", color="FFFFFF", size=9)
+    ws[f"A{base+1}"].fill = PatternFill("solid", fgColor=_GREEN)
+    ws.row_dimensions[base + 1].height = 16
 
-    row = 4
+    row = base + 3
     bits = []
     if "target_customer_savings" in settings:
         bits.append(f"Target customer savings: {settings['target_customer_savings']:.0%}")
