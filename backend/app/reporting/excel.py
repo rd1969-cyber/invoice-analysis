@@ -87,7 +87,7 @@ def _kpis(ws, start_row: int, summary: dict, mode: str) -> int:
             ("Competitor spend", f"${summary['competitor_total']:,.2f}"),
             ("My cost", f"${summary['my_cost_total']:,.2f}"),
             ("Margin — beat model", f"${summary['total_margin']:,.2f}"),
-            ("Margin — cost-plus model", f"${summary.get('costplus_total_margin', 0):,.2f}"),
+            ("Margin — margin model", f"${summary.get('margin_total_margin', 0):,.2f}"),
         ]
     else:
         pairs = [
@@ -122,11 +122,11 @@ def build_workbook(records: list[dict], summary: dict, mode: str, settings: dict
         # Full picture: every carrier's cost side by side + BOTH pricing models.
         headers = ["Tracking", "Competitor svc", "Scope", "They pay",
                    "Purolator", "Canpar", "DHL", "Best", "My cost", "Difference", "Status",
-                   "Beat sell", "Beat margin", "Beat %", "Cost+ sell", "Cost+ margin", "Cost+ %"]
+                   "Beat sell", "Beat margin", "Beat %", "Margin sell", "Margin $", "Margin %"]
         keys = ["tracking", "competitor_service", "scope", "competitor_pays",
                 "Purolator_cost", "Canpar_cost", "DHL_cost", "my_carrier", "my_cost",
                 "difference", "status", "beat_sell", "beat_margin", "beat_margin_pct",
-                "cp_sell", "cp_margin", "cp_margin_pct"]
+                "mgn_sell", "mgn_margin", "mgn_margin_pct"]
         money_cols = {4, 5, 6, 7, 9, 10, 12, 13, 15, 16}
         pct_cols = {14, 17}
         data = records
@@ -137,8 +137,8 @@ def build_workbook(records: list[dict], summary: dict, mode: str, settings: dict
                 "_you_save", "_pct_saved"]
         money_cols = {3, 4, 5}
         pct_cols = {6}
-        sell_key = "cp_sell" if basis == "costplus" else "beat_sell"
-        save_key = "cp_savings" if basis == "costplus" else "beat_savings"
+        sell_key = "mgn_sell" if basis == "margin" else "beat_sell"
+        save_key = "mgn_savings" if basis == "margin" else "beat_savings"
         # customer view: only lanes where we can offer a saving (price <= their price)
         data = [r for r in records if r.get(save_key) is not None and r[save_key] >= 0
                 and r.get(sell_key)]

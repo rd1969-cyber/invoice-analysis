@@ -27,7 +27,9 @@ from app.parsers.ups import UPSParser  # noqa: E402
 from app.rating import fuel as fuelmod  # noqa: E402
 from app.rating import zones as zonesmod  # noqa: E402
 from app.rating.cards import adjust_card, load_any, load_card  # noqa: E402
-from app.rating.comparison import build_rows, rows_to_records, summarize  # noqa: E402
+from app.rating.comparison import (  # noqa: E402
+    build_rows, parse_manual_costs, rows_to_records, summarize,
+)
 from app.reporting.excel import build_workbook  # noqa: E402
 
 SAMPLES_INV = os.path.join(_ROOT, "samples", "invoices")
@@ -144,9 +146,9 @@ with st.sidebar:
     st.caption("Pricing — both models run; pick which drives the customer report")
     target_savings = st.slider("Beat model: customer savings vs their price", 0, 40, 15, 1) / 100
     min_margin = st.slider("Beat model: minimum margin floor", 0, 40, 10, 1) / 100
-    markup = st.slider("Cost-plus model: markup on cost", 0, 100, 25, 1) / 100
-    pricing_basis = st.radio("Customer-report price basis", ["beat", "costplus"],
-                             format_func=lambda b: "Beat competitor" if b == "beat" else "Cost-plus")
+    target_margin = st.slider("Margin model: target gross margin (% of sell)", 0, 80, 20, 1) / 100
+    pricing_basis = st.radio("Customer-report price basis", ["beat", "margin"],
+                             format_func=lambda b: "Beat competitor" if b == "beat" else "Target margin")
 
     st.caption("Fuel surcharges (current published — editable)")
     fuel_inputs = {}
@@ -158,11 +160,12 @@ with st.sidebar:
             help=f"eff {fr.effective} ({'verified' if fr.verified else 'estimated'})",
         ) / 100
 
-    st.caption("Base-rate adjustment per carrier")
+    st.caption("Carrier rate adjustment / extra discount (− lowers your cost)")
     adj = {
-        "DHL": st.slider("DHL base ±%", -30, 30, 0, 1) / 100,
-        "Canpar": st.slider("Canpar base ±%", -30, 30, 0, 1) / 100,
-        "Purolator": st.slider("Purolator base ±%", -30, 30, 0, 1) / 100,
+        "DHL": st.slider("DHL rate ±%", -50, 30, 0, 1,
+                         help="Use a negative % to apply your DHL discount if the card is list-rate") / 100,
+        "Canpar": st.slider("Canpar rate ±%", -50, 30, 0, 1) / 100,
+        "Purolator": st.slider("Purolator rate ±%", -50, 30, 0, 1) / 100,
     }
     report_mode = st.radio("Report mode", ["internal", "customer"], format_func=str.title)
 
@@ -290,6 +293,32 @@ with tab_cards:
             st.caption(f"{carrier}: no chart — zone estimated from destination province")
     st.caption("Carrier-specific dimensional weight is always applied.")
 
+    st.divider()
+    st.markdown("**Manual costs** — for carriers with no rate card / manual costing")
+    st.caption("Upload a CSV or Excel with columns: **tracking**, **cost** (and optionally "
+               "**carrier**, **service**). Matching shipments use your manual cost instead of a "
+               "computed rate.")
+    manual_costs = {}
+    mc = st.file_uploader("Manual cost file (CSV or Excel)", type=["csv", "xlsx", "xls"],
+                          key="manual_cost_file")
+    if mc is not None:
+        try:
+            if mc.name.lower().endswith(".csv"):
+                mdf = pd.read_csv(mc)
+            else:
+                mdf = pd.read_excel(mc)
+            manual_costs = parse_manual_costs(mdf.to_dict("records"))
+            st.success(f"Loaded {len(manual_costs)} manual cost overrides "
+                       f"(matched by tracking number).")
+        except Exception as e:
+            st.error(f"Could not read manual cost file: {e}")
+    # Template download
+    tmpl = pd.DataFrame([{"tracking": "1ZE88F61...", "cost": 42.50,
+                          "carrier": "FedEx", "service": "Ground"}])
+    st.download_button("⬇ Manual cost template (CSV)", tmpl.to_csv(index=False).encode(),
+                       file_name="manual-cost-template.csv", mime="text/csv")
+    st.session_state["manual_costs"] = manual_costs
+
 # ---- Tab 3: comparison ---------------------------------------------------- #
 with tab_compare:
     st.subheader("Rate comparison & suggested margin")
@@ -300,15 +329,18 @@ with tab_compare:
     elif not cards:
         st.info("Load rate cards in tab 2 first.")
     else:
-        rows = build_rows(invoices, cards)
-        records = rows_to_records(rows, target_savings, min_margin, markup)
+        manual_costs = st.session_state.get("manual_costs") or {}
+        rows = build_rows(invoices, cards, manual_costs)
+        records = rows_to_records(rows, target_savings, min_margin, target_margin)
         summary = summarize(records)
+        if manual_costs:
+            st.caption(f"Using {len(manual_costs)} manual cost override(s) from tab 2.")
 
         k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Winnable lanes", f"{summary['winnable']} / {summary['serviceable']}")
         k2.metric("Competitor spend", f"${summary['competitor_total']:,.0f}")
         k3.metric("Margin · beat model", f"${summary['total_margin']:,.0f}")
-        k4.metric("Margin · cost-plus", f"${summary['costplus_total_margin']:,.0f}")
+        k4.metric(f"Margin · {target_margin:.0%} margin", f"${summary['margin_total_margin']:,.0f}")
         k5.metric("Customer savings · beat", f"${summary['total_customer_savings']:,.0f}")
         if summary["by_carrier_margin"]:
             st.caption("Winnable by carrier (beat model): " + "  ·  ".join(
@@ -318,8 +350,8 @@ with tab_compare:
         st.markdown("**Best carrier per lane — both pricing models**")
         df = pd.DataFrame(records)
         if report_mode == "customer":
-            sell_k = "cp_sell" if pricing_basis == "costplus" else "beat_sell"
-            save_k = "cp_savings" if pricing_basis == "costplus" else "beat_savings"
+            sell_k = "mgn_sell" if pricing_basis == "margin" else "beat_sell"
+            save_k = "mgn_savings" if pricing_basis == "margin" else "beat_savings"
             view = df[(df[save_k].notna()) & (df[save_k] >= 0)][
                 ["tracking", "competitor_service", "my_carrier", "competitor_pays", sell_k, save_k]
             ].rename(columns={"competitor_pays": "current_price", sell_k: "your_price",
@@ -328,7 +360,7 @@ with tab_compare:
         else:
             cols = ["tracking", "scope", "my_carrier", "competitor_pays", "my_cost", "difference",
                     "status", "beat_sell", "beat_margin", "beat_margin_pct",
-                    "cp_sell", "cp_margin", "cp_margin_pct"]
+                    "mgn_sell", "mgn_margin", "mgn_margin_pct"]
 
             def _style(r):
                 if r.get("status") == "HIGH":
@@ -339,7 +371,7 @@ with tab_compare:
 
             st.dataframe(df[cols].style.apply(_style, axis=1), width="stretch", height=360)
             st.caption("RED = my cost is HIGH (can't beat their price).  Dark = competitive.  "
-                       "beat_* = beat-competitor pricing · cp_* = cost-plus pricing.")
+                       "beat_* = beat-competitor pricing · mgn_* = target-margin pricing.")
 
         # ---- All carriers side by side ---- #
         st.markdown("**All carriers side by side** — every carrier's cost per lane (cheapest wins)")
@@ -362,11 +394,11 @@ with tab_compare:
                    "that lane (e.g. DHL has no domestic product; Canpar/Purolator are domestic only).")
 
         settings = {"target_customer_savings": target_savings, "min_margin_pct": min_margin,
-                    "markup_pct": markup, "pricing_basis": pricing_basis}
+                    "target_margin": target_margin, "pricing_basis": pricing_basis}
         xlsx = build_workbook(records, summary, report_mode, settings)
         st.download_button(
             f"⬇ Download {report_mode} report (Excel) — "
-            f"{'cost-plus' if pricing_basis == 'costplus' else 'beat'} pricing",
+            f"{'target-margin' if pricing_basis == 'margin' else 'beat'} pricing",
             data=xlsx, file_name=f"freight-iq-{report_mode}-report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )

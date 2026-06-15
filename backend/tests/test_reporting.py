@@ -34,16 +34,17 @@ def test_records_status_and_margin():
 
 
 def test_both_pricing_models_present():
-    # A: cost $40, markup 25% -> cost-plus sell $50, margin $10; beat sell $85.
+    # A: cost $40. Margin 20% -> sell = 40/0.8 = $50, margin $10. Beat -> sell $85.
     recs = rows_to_records(
         [_row("A", 10000, 4000)], target_customer_savings=0.15,
-        min_margin_pct=0.10, markup_pct=0.25,
+        min_margin_pct=0.10, target_margin=0.20,
     )
     r = recs[0]
     assert r["beat_sell"] == 85.0
-    assert r["cp_sell"] == 50.0
-    assert r["cp_margin"] == 10.0
-    assert r["cp_savings"] == 50.0   # $100 - $50
+    assert r["mgn_sell"] == 50.0          # 40 / (1 - 0.20)
+    assert r["mgn_margin"] == 10.0
+    assert round(r["mgn_margin_pct"], 2) == 0.20
+    assert r["mgn_savings"] == 50.0       # $100 - $50
     # per-carrier cost column present for the quoting carrier
     assert r["Purolator_cost"] == 40.0
 
