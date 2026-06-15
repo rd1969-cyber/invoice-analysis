@@ -83,10 +83,11 @@ def _kpis(ws, start_row: int, summary: dict, mode: str) -> int:
         pairs = [
             ("Shipments", summary["shipments"]),
             ("Serviceable", summary["serviceable"]),
-            ("Winnable lanes", summary["winnable"]),
+            ("Winnable lanes (beat model)", summary["winnable"]),
             ("Competitor spend", f"${summary['competitor_total']:,.2f}"),
             ("My cost", f"${summary['my_cost_total']:,.2f}"),
-            ("Total margin (if won)", f"${summary['total_margin']:,.2f}"),
+            ("Margin — beat model", f"${summary['total_margin']:,.2f}"),
+            ("Margin — cost-plus model", f"${summary.get('costplus_total_margin', 0):,.2f}"),
         ]
     else:
         pairs = [
@@ -116,27 +117,35 @@ def build_workbook(records: list[dict], summary: dict, mode: str, settings: dict
     row = _title_block(ws, title, mode, settings)
     row = _kpis(ws, row, summary, mode)
 
+    basis = settings.get("pricing_basis", "beat")  # 'beat' or 'costplus'
     if mode == "internal":
-        headers = ["Tracking", "Competitor svc", "Scope", "They pay", "Best carrier",
-                   "My service", "My cost", "Difference", "Status", "Suggested sell",
-                   "Margin", "Margin %"]
-        keys = ["tracking", "competitor_service", "scope", "competitor_pays", "my_carrier",
-                "my_service", "my_cost", "difference", "status", "suggested_sell",
-                "margin", "margin_pct"]
-        money_cols = {4, 7, 8, 10, 11}
-        pct_cols = {12}
+        # Full picture: every carrier's cost side by side + BOTH pricing models.
+        headers = ["Tracking", "Competitor svc", "Scope", "They pay",
+                   "Purolator", "Canpar", "DHL", "Best", "My cost", "Difference", "Status",
+                   "Beat sell", "Beat margin", "Beat %", "Cost+ sell", "Cost+ margin", "Cost+ %"]
+        keys = ["tracking", "competitor_service", "scope", "competitor_pays",
+                "Purolator_cost", "Canpar_cost", "DHL_cost", "my_carrier", "my_cost",
+                "difference", "status", "beat_sell", "beat_margin", "beat_margin_pct",
+                "cp_sell", "cp_margin", "cp_margin_pct"]
+        money_cols = {4, 5, 6, 7, 9, 10, 12, 13, 15, 16}
+        pct_cols = {14, 17}
         data = records
     else:
         headers = ["Tracking", "Service", "Current price", "Your InXpress price",
                    "You save", "% saved"]
-        keys = ["tracking", "competitor_service", "competitor_pays", "suggested_sell",
-                "customer_savings", "margin_pct"]
+        keys = ["tracking", "competitor_service", "competitor_pays", "_your_price",
+                "_you_save", "_pct_saved"]
         money_cols = {3, 4, 5}
         pct_cols = {6}
-        # customer view: only winnable lanes, and % saved is savings/current
-        data = [r for r in records if r["status"] == "LOW" and r["suggested_sell"]]
+        sell_key = "cp_sell" if basis == "costplus" else "beat_sell"
+        save_key = "cp_savings" if basis == "costplus" else "beat_savings"
+        # customer view: only lanes where we can offer a saving (price <= their price)
+        data = [r for r in records if r.get(save_key) is not None and r[save_key] >= 0
+                and r.get(sell_key)]
         for r in data:
-            r["_pct_saved"] = (r["customer_savings"] / r["competitor_pays"]) if r["competitor_pays"] else 0
+            r["_your_price"] = r[sell_key]
+            r["_you_save"] = r[save_key]
+            r["_pct_saved"] = (r[save_key] / r["competitor_pays"]) if r["competitor_pays"] else 0
 
     head_row = row
     for c, h in enumerate(headers, 1):
@@ -150,10 +159,7 @@ def build_workbook(records: list[dict], summary: dict, mode: str, settings: dict
     for rec in data:
         is_high = rec.get("status") == "HIGH"
         for c, key in enumerate(keys, 1):
-            if mode == "customer" and key == "margin_pct":
-                val = rec.get("_pct_saved")
-            else:
-                val = rec.get(key)
+            val = rec.get(key)
             cell = ws.cell(row, c, val)
             if c in money_cols and isinstance(val, (int, float)):
                 cell.number_format = _MONEY
@@ -162,11 +168,12 @@ def build_workbook(records: list[dict], summary: dict, mode: str, settings: dict
             # red/black convention on difference + status (internal)
             if mode == "internal" and key in ("difference", "status"):
                 cell.font = _RED_FONT if is_high else _DARK_FONT
-            elif mode == "customer" and key in ("customer_savings", "margin_pct"):
+            elif mode == "customer" and key in ("_you_save", "_pct_saved"):
                 cell.font = Font(name="Calibri", bold=True, color=_GREEN.upper())
         row += 1
 
-    widths = ({1: 20, 2: 16, 3: 16, 4: 11, 5: 12, 6: 22, 7: 11, 8: 11, 9: 8, 10: 13, 11: 11, 12: 9}
+    widths = ({1: 20, 2: 15, 3: 15, 4: 9, 5: 10, 6: 9, 7: 9, 8: 10, 9: 9, 10: 10, 11: 8,
+               12: 10, 13: 11, 14: 7, 15: 10, 16: 11, 17: 7}
               if mode == "internal" else {1: 20, 2: 18, 3: 13, 4: 17, 5: 11, 6: 9})
     _autofit(ws, widths)
     ws.freeze_panes = ws.cell(head_row + 1, 1)

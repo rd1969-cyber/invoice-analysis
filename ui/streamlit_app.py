@@ -141,9 +141,12 @@ inject_brand_css()
 # ---- Sidebar: settings ---------------------------------------------------- #
 with st.sidebar:
     st.header("Settings")
-    st.caption("Pricing")
-    target_savings = st.slider("Customer savings offered (vs their price)", 0, 40, 15, 1) / 100
-    min_margin = st.slider("Minimum margin floor", 0, 40, 10, 1) / 100
+    st.caption("Pricing — both models run; pick which drives the customer report")
+    target_savings = st.slider("Beat model: customer savings vs their price", 0, 40, 15, 1) / 100
+    min_margin = st.slider("Beat model: minimum margin floor", 0, 40, 10, 1) / 100
+    markup = st.slider("Cost-plus model: markup on cost", 0, 100, 25, 1) / 100
+    pricing_basis = st.radio("Customer-report price basis", ["beat", "costplus"],
+                             format_func=lambda b: "Beat competitor" if b == "beat" else "Cost-plus")
 
     st.caption("Fuel surcharges (current published — editable)")
     fuel_inputs = {}
@@ -298,41 +301,72 @@ with tab_compare:
         st.info("Load rate cards in tab 2 first.")
     else:
         rows = build_rows(invoices, cards)
-        records = rows_to_records(rows, target_savings, min_margin)
+        records = rows_to_records(rows, target_savings, min_margin, markup)
         summary = summarize(records)
 
-        k1, k2, k3, k4 = st.columns(4)
+        k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Winnable lanes", f"{summary['winnable']} / {summary['serviceable']}")
         k2.metric("Competitor spend", f"${summary['competitor_total']:,.0f}")
-        k3.metric("Total margin (if won)", f"${summary['total_margin']:,.0f}")
-        k4.metric("Customer savings", f"${summary['total_customer_savings']:,.0f}")
+        k3.metric("Margin · beat model", f"${summary['total_margin']:,.0f}")
+        k4.metric("Margin · cost-plus", f"${summary['costplus_total_margin']:,.0f}")
+        k5.metric("Customer savings · beat", f"${summary['total_customer_savings']:,.0f}")
         if summary["by_carrier_margin"]:
-            st.caption("Winnable by carrier: " + "  ·  ".join(
+            st.caption("Winnable by carrier (beat model): " + "  ·  ".join(
                 f"{c}: {summary['by_carrier_lanes'][c]} lanes (${summary['by_carrier_margin'][c]:,.0f})"
                 for c in summary["by_carrier_margin"]))
 
+        st.markdown("**Best carrier per lane — both pricing models**")
         df = pd.DataFrame(records)
         if report_mode == "customer":
-            df = df[df["status"] == "LOW"][
-                ["tracking", "competitor_service", "competitor_pays", "suggested_sell",
-                 "customer_savings", "margin_pct"]
-            ].rename(columns={"competitor_pays": "current_price", "suggested_sell": "your_price",
-                              "customer_savings": "you_save", "margin_pct": "pct_saved"})
+            sell_k = "cp_sell" if pricing_basis == "costplus" else "beat_sell"
+            save_k = "cp_savings" if pricing_basis == "costplus" else "beat_savings"
+            view = df[(df[save_k].notna()) & (df[save_k] >= 0)][
+                ["tracking", "competitor_service", "my_carrier", "competitor_pays", sell_k, save_k]
+            ].rename(columns={"competitor_pays": "current_price", sell_k: "your_price",
+                              save_k: "you_save", "my_carrier": "carrier"})
+            st.dataframe(view, use_container_width=True, height=360, hide_index=True)
+        else:
+            cols = ["tracking", "scope", "my_carrier", "competitor_pays", "my_cost", "difference",
+                    "status", "beat_sell", "beat_margin", "beat_margin_pct",
+                    "cp_sell", "cp_margin", "cp_margin_pct"]
 
-        def _style(row):
-            if report_mode == "internal" and row.get("status") == "HIGH":
-                return [f"color: {brand.RED}"] * len(row)
-            if report_mode == "internal" and row.get("status") == "LOW":
-                return [f"color: {brand.MIDNIGHT_BLUE}"] * len(row)
-            return [""] * len(row)
+            def _style(r):
+                if r.get("status") == "HIGH":
+                    return [f"color: {brand.RED}"] * len(r)
+                if r.get("status") == "LOW":
+                    return [f"color: {brand.MIDNIGHT_BLUE}"] * len(r)
+                return [""] * len(r)
 
-        st.dataframe(df.style.apply(_style, axis=1), use_container_width=True, height=380)
-        st.caption("RED = my cost is HIGH (can't beat their price).  Dark = competitive.")
+            st.dataframe(df[cols].style.apply(_style, axis=1), use_container_width=True, height=360)
+            st.caption("RED = my cost is HIGH (can't beat their price).  Dark = competitive.  "
+                       "beat_* = beat-competitor pricing · cp_* = cost-plus pricing.")
 
-        settings = {"target_customer_savings": target_savings, "min_margin_pct": min_margin}
+        # ---- All carriers side by side ---- #
+        st.markdown("**All carriers side by side** — every carrier's cost per lane (cheapest wins)")
+        carrier_cols = [f"{c}_cost" for c in ("Purolator", "Canpar", "DHL")]
+        side = df[["tracking", "scope", "competitor_pays", *carrier_cols,
+                   "my_carrier", "my_cost"]].rename(columns={"competitor_pays": "UPS_pays",
+                                                             "my_carrier": "cheapest"})
+
+        def _hl_best(r):
+            out = [""] * len(r)
+            best = r["cheapest"]
+            for i, col in enumerate(side.columns):
+                if col == f"{best}_cost":
+                    out[i] = f"background-color: {brand.SPRING_GREEN}33; font-weight:600"
+            return out
+
+        st.dataframe(side.style.apply(_hl_best, axis=1), use_container_width=True, height=300,
+                     hide_index=True)
+        st.caption("Green = cheapest carrier for that lane. Blank cost = carrier doesn't serve "
+                   "that lane (e.g. DHL has no domestic product; Canpar/Purolator are domestic only).")
+
+        settings = {"target_customer_savings": target_savings, "min_margin_pct": min_margin,
+                    "markup_pct": markup, "pricing_basis": pricing_basis}
         xlsx = build_workbook(records, summary, report_mode, settings)
         st.download_button(
-            f"⬇ Download {report_mode} report (Excel)", data=xlsx,
-            file_name=f"freight-iq-{report_mode}-report.xlsx",
+            f"⬇ Download {report_mode} report (Excel) — "
+            f"{'cost-plus' if pricing_basis == 'costplus' else 'beat'} pricing",
+            data=xlsx, file_name=f"freight-iq-{report_mode}-report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )

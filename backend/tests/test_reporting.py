@@ -8,6 +8,7 @@ def _row(track, comp, cost, carrier="Purolator"):
         tracking=track, service="Standard", scope="domestic_parcel",
         competitor_pays_cents=comp, my_cost_cents=cost,
         my_carrier=carrier, my_service="Ground", quote=None,
+        carrier_costs={carrier: cost} if cost is not None else {},
     )
 
 
@@ -24,11 +25,27 @@ def test_records_status_and_margin():
     recs = _records()
     by = {r["tracking"]: r for r in recs}
     assert by["A"]["status"] == "LOW"
-    assert by["A"]["suggested_sell"] == 85.0   # 15% off $100
-    assert by["A"]["margin"] == 45.0           # 85 - 40
+    assert by["A"]["beat_sell"] == 85.0        # 15% off $100
+    assert by["A"]["beat_margin"] == 45.0      # 85 - 40
+    assert by["A"]["suggested_sell"] == 85.0   # backward-compat alias
     assert by["B"]["status"] == "HIGH"
-    assert by["B"]["margin"] is None
+    assert by["B"]["beat_margin"] is None
     assert by["C"]["status"] == "NO RATE"
+
+
+def test_both_pricing_models_present():
+    # A: cost $40, markup 25% -> cost-plus sell $50, margin $10; beat sell $85.
+    recs = rows_to_records(
+        [_row("A", 10000, 4000)], target_customer_savings=0.15,
+        min_margin_pct=0.10, markup_pct=0.25,
+    )
+    r = recs[0]
+    assert r["beat_sell"] == 85.0
+    assert r["cp_sell"] == 50.0
+    assert r["cp_margin"] == 10.0
+    assert r["cp_savings"] == 50.0   # $100 - $50
+    # per-carrier cost column present for the quoting carrier
+    assert r["Purolator_cost"] == 40.0
 
 
 def test_summary_totals():

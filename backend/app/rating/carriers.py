@@ -102,10 +102,9 @@ def quote_domestic(s: ShipmentInput, carrier: str, card: RateCardData) -> Quote 
     return best
 
 
-def quote_best(s: ShipmentInput, cards: dict[str, RateCardData]) -> Quote | None:
-    """Best (cheapest) quote across all applicable carriers for this shipment."""
+def quote_all(s: ShipmentInput, cards: dict[str, RateCardData]) -> list[Quote]:
+    """Every applicable carrier's quote for this shipment (not just the cheapest)."""
     candidates: list[Quote] = []
-
     if s.scope == "domestic_parcel":
         for carrier in ("Canpar", "Purolator"):
             card = cards.get(carrier)
@@ -113,7 +112,6 @@ def quote_best(s: ShipmentInput, cards: dict[str, RateCardData]) -> Quote | None
                 q = quote_domestic(s, carrier, card)
                 if q is not None:
                     candidates.append(q)
-
     elif s.scope in ("us_bound_parcel", "international"):
         from app.rating.dhl import quote_dhl
 
@@ -122,7 +120,10 @@ def quote_best(s: ShipmentInput, cards: dict[str, RateCardData]) -> Quote | None
             q = quote_dhl(s, card)
             if q is not None:
                 candidates.append(q)
+    return candidates
 
-    if not candidates:
-        return None
-    return min(candidates, key=lambda q: q.cost_cents)
+
+def quote_best(s: ShipmentInput, cards: dict[str, RateCardData]) -> Quote | None:
+    """Best (cheapest) quote across all applicable carriers for this shipment."""
+    candidates = quote_all(s, cards)
+    return min(candidates, key=lambda q: q.cost_cents) if candidates else None

@@ -42,6 +42,11 @@ class ComparisonRow:
     my_carrier: str | None
     my_service: str | None
     quote: Quote | None
+    carrier_costs: dict[str, int] = None  # carrier -> cost cents (all carriers quoted)
+
+    def __post_init__(self):
+        if self.carrier_costs is None:
+            self.carrier_costs = {}
 
     @property
     def serviceable(self) -> bool:
@@ -77,6 +82,21 @@ class ComparisonRow:
         savings = self.competitor_pays_cents - sell
         return sell, margin, margin_pct, savings
 
+    def cost_plus(self, markup_pct: float):
+        """Cost-plus pricing: sell = cost x (1 + markup).
+
+        Returns (sell, margin, margin_pct, customer_savings) in cents, or None if
+        unserviceable. customer_savings = competitor price - sell; it can be
+        negative (the cost-plus price would land ABOVE the customer's UPS price).
+        """
+        if self.my_cost_cents is None:
+            return None
+        sell = round(self.my_cost_cents * (1 + markup_pct))
+        margin = sell - self.my_cost_cents
+        margin_pct = margin / sell if sell else 0.0
+        savings = self.competitor_pays_cents - sell
+        return sell, margin, margin_pct, savings
+
 
 def _to_input(s: ParsedShipment, scope: str) -> ShipmentInput:
     return ShipmentInput(
@@ -101,36 +121,47 @@ def build_rows(invoices: list[ParsedInvoice], cards: dict[str, RateCardData]) ->
     {"DHL": ..., "Canpar": ..., "Purolator": ...}.
     """
     from app.parsers.ups import _classify_scope
+    from app.rating.carriers import quote_all
 
     rows: list[ComparisonRow] = []
     for inv in invoices:
         for s in inv.shipments:
             scope = _classify_scope(s.dest_postal or "", s.dest_country, s.service or "")
-            q = quote_best(_to_input(s, scope), cards)
+            quotes = quote_all(_to_input(s, scope), cards)
+            best = min(quotes, key=lambda q: q.cost_cents) if quotes else None
             rows.append(
                 ComparisonRow(
                     tracking=s.tracking_number or "-",
                     service=s.service or "-",
                     scope=scope,
                     competitor_pays_cents=s.total_charge_cents,
-                    my_cost_cents=q.cost_cents if q else None,
-                    my_carrier=q.our_carrier if q else None,
-                    my_service=q.our_service if q else None,
-                    quote=q,
+                    my_cost_cents=best.cost_cents if best else None,
+                    my_carrier=best.our_carrier if best else None,
+                    my_service=best.our_service if best else None,
+                    quote=best,
+                    carrier_costs={q.our_carrier: q.cost_cents for q in quotes},
                 )
             )
     return rows
+
+
+ALL_CARRIERS = ["Purolator", "Canpar", "DHL"]
 
 
 def rows_to_records(
     rows: list[ComparisonRow],
     target_customer_savings: float = 0.15,
     min_margin_pct: float = 0.10,
+    markup_pct: float = 0.25,
 ) -> list[dict]:
     """Flatten comparison rows into dicts for tables / DataFrames / Excel.
 
     Money fields are floats in dollars. ``status`` is 'HIGH' (red) or 'LOW'.
-    Unserviceable shipments are included with status 'NO RATE'.
+    Includes BOTH pricing models per row:
+      * beat_*  — beat the competitor by ``target_customer_savings`` (floored at margin)
+      * cp_*    — cost-plus: cost x (1 + ``markup_pct``)
+    and each carrier's cost side by side (``Purolator_cost`` etc.).
+    ``suggested_*`` mirror the beat model for backward compatibility.
     """
     recs: list[dict] = []
     for r in rows:
@@ -144,20 +175,31 @@ def rows_to_records(
             "my_cost": (r.my_cost_cents / 100) if r.serviceable else None,
             "difference": (r.difference_cents / 100) if r.serviceable else None,
             "status": "NO RATE" if not r.serviceable else ("HIGH" if r.is_high else "LOW"),
-            "suggested_sell": None,
-            "margin": None,
-            "margin_pct": None,
-            "customer_savings": None,
         }
-        sug = r.suggested(target_customer_savings, min_margin_pct) if r.serviceable else None
-        if sug:
-            sell, margin, mpct, savings = sug
-            rec.update(
-                suggested_sell=sell / 100,
-                margin=margin / 100,
-                margin_pct=round(mpct, 4),
-                customer_savings=savings / 100,
-            )
+        # per-carrier costs side by side
+        for carrier in ALL_CARRIERS:
+            c = r.carrier_costs.get(carrier)
+            rec[f"{carrier}_cost"] = (c / 100) if c is not None else None
+
+        # beat-competitor model
+        beat = r.suggested(target_customer_savings, min_margin_pct) if r.serviceable else None
+        rec["beat_sell"] = rec["beat_margin"] = rec["beat_margin_pct"] = rec["beat_savings"] = None
+        if beat:
+            sell, margin, mpct, savings = beat
+            rec.update(beat_sell=sell / 100, beat_margin=margin / 100,
+                       beat_margin_pct=round(mpct, 4), beat_savings=savings / 100)
+
+        # cost-plus model
+        cp = r.cost_plus(markup_pct) if r.serviceable else None
+        rec["cp_sell"] = rec["cp_margin"] = rec["cp_margin_pct"] = rec["cp_savings"] = None
+        if cp:
+            sell, margin, mpct, savings = cp
+            rec.update(cp_sell=sell / 100, cp_margin=margin / 100,
+                       cp_margin_pct=round(mpct, 4), cp_savings=savings / 100)
+
+        # backward-compat aliases (beat model)
+        rec.update(suggested_sell=rec["beat_sell"], margin=rec["beat_margin"],
+                   margin_pct=rec["beat_margin_pct"], customer_savings=rec["beat_savings"])
         recs.append(rec)
     return recs
 
@@ -174,6 +216,8 @@ def summarize(records: list[dict]) -> dict:
         if r["margin"]:
             by_carrier_lanes[r["my_carrier"]] += 1
             by_carrier_margin[r["my_carrier"]] += r["margin"]
+    # Cost-plus is "competitive" on a lane when its price lands at/below UPS.
+    cp_win = [r for r in serv if (r.get("cp_savings") or 0) >= 0]
     return {
         "shipments": len(records),
         "serviceable": len(serv),
@@ -181,10 +225,16 @@ def summarize(records: list[dict]) -> dict:
         "winnable": len(win),
         "competitor_total": sum(r["competitor_pays"] for r in serv),
         "my_cost_total": sum(r["my_cost"] for r in serv if r["my_cost"] is not None),
-        "total_margin": sum(r["margin"] for r in win if r["margin"]),
-        "total_customer_savings": sum(r["customer_savings"] for r in win if r["customer_savings"]),
+        # beat-competitor model
+        "total_margin": sum(r["beat_margin"] for r in win if r["beat_margin"]),
+        "total_customer_savings": sum(r["beat_savings"] for r in win if r["beat_savings"]),
         "by_carrier_lanes": dict(by_carrier_lanes),
         "by_carrier_margin": dict(by_carrier_margin),
+        # cost-plus model
+        "costplus_winnable": len(cp_win),
+        "costplus_total_margin": sum(r["cp_margin"] for r in cp_win if r["cp_margin"]),
+        "costplus_total_customer_savings": sum(
+            r["cp_savings"] for r in cp_win if r["cp_savings"]),
     }
 
 
