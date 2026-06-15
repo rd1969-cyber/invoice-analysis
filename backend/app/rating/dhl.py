@@ -69,6 +69,7 @@ def quote_dhl(
     card: RateCardData,
     fuel_override: float | None = None,
     zone_map: dict[str, str] | None = None,
+    accessorials: list[str] = (),
 ) -> Quote | None:
     """Return the cheapest applicable DHL quote, or None if DHL can't serve it."""
     zone_map = zone_map or COUNTRY_TO_ZONE
@@ -93,12 +94,17 @@ def quote_dhl(
             continue
         q = Quote(our_carrier="DHL", our_service=prod_name, currency=card.currency)
         q.add("BASE", "DHL base", base_cents, f"{wnote}; zone {zone}; {detail}")
+        # Accessorials before fuel — DHL fuel surcharge applies to base + accessorials.
+        from app.rating.carriers import _add_accessorials
+
+        acc_total = _add_accessorials(q, "DHL", accessorials)
         fr = fuel_rate("DHL", prod_name)
         fpct = fuel_override if fuel_override is not None else fr.pct
         if fpct:
             tag = "" if fr.verified else " [est]"
-            q.add("FUEL", "Fuel surcharge", round(base_cents * fpct),
-                  f"{fpct:.2%} of base (eff {fr.effective}){tag}")
+            basis = "base+accessorials" if acc_total else "base"
+            q.add("FUEL", "Fuel surcharge", round((base_cents + acc_total) * fpct),
+                  f"{fpct:.2%} of {basis} (eff {fr.effective}){tag}")
         if zone_is_placeholder:
             q.warnings.append(f"Zone {zone} for {s.dest_country} is a PLACEHOLDER")
         if best is None or q.cost_cents < best.cost_cents:

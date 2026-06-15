@@ -121,28 +121,33 @@ def quote_domestic(s: ShipmentInput, carrier: str, card: RateCardData,
         q = Quote(our_carrier=carrier, our_service=prod_name, currency=card.currency)
         ztag = zone if zone_exact else f"{zone}(est)"
         q.add("BASE", f"{carrier} base", base, f"{wnote}; zone {ztag}; {detail}")
+        # Accessorials before fuel — carrier fuel surcharge applies to base + accessorials.
+        acc_total = _add_accessorials(q, carrier, accessorials)
         fr = fuel_rate(carrier, prod_name)
         if fr.pct:
             tag = "" if fr.verified else " [est]"
-            q.add("FUEL", "Fuel surcharge", round(base * fr.pct),
-                  f"{fr.pct:.2%} of base (eff {fr.effective}){tag}")
+            basis = "base+accessorials" if acc_total else "base"
+            q.add("FUEL", "Fuel surcharge", round((base + acc_total) * fr.pct),
+                  f"{fr.pct:.2%} of {basis} (eff {fr.effective}){tag}")
         if not zone_exact:
             q.warnings.append(f"Domestic zone {zone} ESTIMATED from province (no FSA->zone chart)")
-        _add_accessorials(q, carrier, accessorials)
         if best is None or q.cost_cents < best.cost_cents:
             best = q
     return best
 
 
-def _add_accessorials(q: Quote, carrier: str, components) -> None:
-    """Append carrier accessorial fees as their own line items."""
+def _add_accessorials(q: Quote, carrier: str, components) -> int:
+    """Append carrier accessorial fees as their own line items; return total cents."""
     from app.rating.accessorials import COMPONENT_CODE, COMPONENT_LABELS, fee
 
+    total = 0
     for comp in components or ():
         cents = fee(carrier, comp)
         if cents:
             q.add(COMPONENT_CODE.get(comp, "OTHER"), COMPONENT_LABELS.get(comp, comp),
                   cents, f"{carrier} {comp} accessorial fee")
+            total += cents
+    return total
 
 
 def quote_all(s: ShipmentInput, cards: dict[str, RateCardData],
@@ -161,9 +166,8 @@ def quote_all(s: ShipmentInput, cards: dict[str, RateCardData],
 
         card = cards.get("DHL")
         if card is not None:
-            q = quote_dhl(s, card)
+            q = quote_dhl(s, card, accessorials=accessorials)
             if q is not None:
-                _add_accessorials(q, "DHL", accessorials)
                 candidates.append(q)
     return candidates
 
