@@ -335,6 +335,14 @@ with tab_compare:
         summary = summarize(records)
         if manual_costs:
             st.caption(f"Using {len(manual_costs)} manual cost override(s) from tab 2.")
+        if summary.get("estimated_zone"):
+            st.warning(
+                f"⚠️ {summary['estimated_zone']} lane(s) use an ESTIMATED zone (guessed from "
+                "destination province), so their domestic costs are NOT reliable — different "
+                "carriers use different zone systems. Load the carrier FSA→zone charts in tab 2 "
+                "to make these exact. The 'zone' column below flags each lane.",
+                icon="⚠️",
+            )
 
         k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Winnable lanes", f"{summary['winnable']} / {summary['serviceable']}")
@@ -358,8 +366,8 @@ with tab_compare:
                               save_k: "you_save", "my_carrier": "carrier"})
             st.dataframe(view, width="stretch", height=360, hide_index=True)
         else:
-            cols = ["tracking", "scope", "my_carrier", "competitor_pays", "my_cost", "difference",
-                    "status", "beat_sell", "beat_margin", "beat_margin_pct",
+            cols = ["tracking", "scope", "my_carrier", "zone_basis", "competitor_pays", "my_cost",
+                    "difference", "status", "beat_sell", "beat_margin", "beat_margin_pct",
                     "mgn_sell", "mgn_margin", "mgn_margin_pct"]
 
             def _style(r):
@@ -376,7 +384,7 @@ with tab_compare:
         # ---- All carriers side by side ---- #
         st.markdown("**All carriers side by side** — every carrier's cost per lane (cheapest wins)")
         carrier_cols = [f"{c}_cost" for c in ("Purolator", "Canpar", "DHL")]
-        side = df[["tracking", "scope", "competitor_pays", *carrier_cols,
+        side = df[["tracking", "scope", "zone_basis", "competitor_pays", *carrier_cols,
                    "my_carrier", "my_cost"]].rename(columns={"competitor_pays": "UPS_pays",
                                                              "my_carrier": "cheapest"})
 

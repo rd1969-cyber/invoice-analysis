@@ -43,6 +43,7 @@ class ComparisonRow:
     my_service: str | None
     quote: Quote | None
     carrier_costs: dict[str, int] = None  # carrier -> cost cents (all carriers quoted)
+    zone_basis: str = "n/a"  # 'exact' | 'estimated' | 'manual' | 'n/a'
 
     def __post_init__(self):
         if self.carrier_costs is None:
@@ -132,6 +133,12 @@ def build_rows(
     from app.parsers.ups import _classify_scope
     from app.rating.carriers import quote_all
 
+    def _zone_basis(q):
+        if q is None:
+            return "n/a"
+        w = " ".join(q.warnings).upper()
+        return "estimated" if ("ESTIMATED" in w or "PLACEHOLDER" in w) else "exact"
+
     manual_costs = manual_costs or {}
     rows: list[ComparisonRow] = []
     for inv in invoices:
@@ -143,6 +150,7 @@ def build_rows(
             my_cost = best.cost_cents if best else None
             my_carrier = best.our_carrier if best else None
             my_service = best.our_service if best else None
+            zone_basis = _zone_basis(best)
 
             # Manual cost override (e.g. carriers with no rate card / manual costing).
             man = manual_costs.get((s.tracking_number or "").strip())
@@ -151,6 +159,7 @@ def build_rows(
                 my_carrier = man.get("carrier") or "Manual"
                 my_service = man.get("service") or "Manual cost"
                 carrier_costs = {**carrier_costs, my_carrier: my_cost}
+                zone_basis = "manual"
 
             rows.append(
                 ComparisonRow(
@@ -163,6 +172,7 @@ def build_rows(
                     my_service=my_service,
                     quote=best,
                     carrier_costs=carrier_costs,
+                    zone_basis=zone_basis,
                 )
             )
     return rows
@@ -239,6 +249,7 @@ def rows_to_records(
             "my_cost": (r.my_cost_cents / 100) if r.serviceable else None,
             "difference": (r.difference_cents / 100) if r.serviceable else None,
             "status": "NO RATE" if not r.serviceable else ("HIGH" if r.is_high else "LOW"),
+            "zone_basis": r.zone_basis,
         }
         # per-carrier costs side by side
         for carrier in ALL_CARRIERS:
@@ -282,11 +293,13 @@ def summarize(records: list[dict]) -> dict:
             by_carrier_margin[r["my_carrier"]] += r["margin"]
     # Margin model is "competitive" on a lane when its price lands at/below UPS.
     mgn_win = [r for r in serv if (r.get("mgn_savings") or 0) >= 0]
+    estimated_zone = sum(1 for r in serv if r.get("zone_basis") == "estimated")
     return {
         "shipments": len(records),
         "serviceable": len(serv),
         "no_rate": len(records) - len(serv),
         "winnable": len(win),
+        "estimated_zone": estimated_zone,
         "competitor_total": sum(r["competitor_pays"] for r in serv),
         "my_cost_total": sum(r["my_cost"] for r in serv if r["my_cost"] is not None),
         # beat-competitor model
