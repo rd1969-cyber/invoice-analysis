@@ -25,6 +25,8 @@ class SpendReport:
     by_service: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     by_scope: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     by_accessorial: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    tax_cents: int = 0
+    by_tax: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     top_shipments: list[ParsedShipment] = field(default_factory=list)
     low_confidence_count: int = 0
 
@@ -43,11 +45,43 @@ def _scope(s: ParsedShipment) -> str:
     return _classify_scope(s.dest_postal or "", s.dest_country, s.service or "")
 
 
+# Accessorial columns broken out per shipment (order = display order).
+ACCESSORIAL_COLUMNS = [
+    "fuel", "residential", "das", "signature", "brokerage", "customs",
+    "additional_handling", "oversize", "address_correction", "other",
+]
+ACCESSORIAL_LABELS = {
+    "fuel": "Fuel", "residential": "Residential", "das": "DAS",
+    "signature": "Signature", "brokerage": "Brokerage", "customs": "Customs",
+    "additional_handling": "Add'l handling", "oversize": "Oversize",
+    "address_correction": "Addr correction", "other": "Other acc.",
+}
+
+
+def shipment_breakdown(s: ParsedShipment) -> dict[str, float]:
+    """Per-shipment charge breakdown in dollars: base, each accessorial type, total.
+
+    (Taxes are invoice-level on UPS, not per shipment — see SpendReport.by_tax.)
+    """
+    acc = {k: 0 for k in ACCESSORIAL_COLUMNS}
+    for a in s.accessorials:
+        t = a["type"] if a["type"] in acc else "other"
+        acc[t] += a["amount_cents"]
+    out = {"base": s.base_charge_cents / 100}
+    out.update({k: acc[k] / 100 for k in ACCESSORIAL_COLUMNS})
+    out["tax"] = s.tax_cents / 100
+    out["total"] = s.total_charge_cents / 100
+    return out
+
+
 def analyze(invoices: list[ParsedInvoice], top_n: int = 10) -> SpendReport:
     r = SpendReport(invoice_count=len(invoices))
     all_ships: list[ParsedShipment] = []
 
     for inv in invoices:
+        r.tax_cents += inv.tax_cents
+        for kind, amt in (inv.taxes or {}).items():
+            r.by_tax[kind] += amt
         for s in inv.shipments:
             all_ships.append(s)
             r.shipment_count += 1

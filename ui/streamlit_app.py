@@ -20,7 +20,9 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from app import brand  # noqa: E402
-from app.analysis.spend import analyze, SpendReport  # noqa: E402
+from app.analysis.spend import (  # noqa: E402
+    ACCESSORIAL_COLUMNS, ACCESSORIAL_LABELS, analyze, SpendReport, shipment_breakdown,
+)
 from app.parsers.ups import UPSParser  # noqa: E402
 from app.rating import fuel as fuelmod  # noqa: E402
 from app.rating import zones as zonesmod  # noqa: E402
@@ -187,24 +189,54 @@ with tab_inv:
         st.session_state["invoices"] = invoices
         rep: SpendReport = analyze(invoices)
         st.success(f"Parsed {len(files)} invoice(s) · {rep.shipment_count} shipments")
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Total spend", f"${rep.total_billed_cents/100:,.0f}")
         c2.metric("Shipments", rep.shipment_count)
         c3.metric("Fuel % of spend", f"{rep.fuel_pct:.1%}")
-        c4.metric("Avg / shipment", f"${rep.avg_cost_per_shipment:,.2f}")
+        c4.metric("Accessorials", f"${rep.accessorial_cents/100:,.0f}")
+        c5.metric("Tax", f"${rep.tax_cents/100:,.0f}")
 
+        # Accessorials & taxes broken out (totals across all invoices)
+        with st.expander("Accessorials & taxes — totals broken out", expanded=True):
+            acol, tcol = st.columns(2)
+            acc_rows = [{"Accessorial": ACCESSORIAL_LABELS.get(k, k), "Amount $": v / 100}
+                        for k, v in sorted(rep.by_accessorial.items(), key=lambda x: -x[1])]
+            acol.caption("By accessorial type")
+            acol.dataframe(pd.DataFrame(acc_rows), use_container_width=True, hide_index=True)
+            tax_rows = [{"Tax": k, "Amount $": v / 100}
+                        for k, v in sorted(rep.by_tax.items(), key=lambda x: -x[1])]
+            tax_rows.append({"Tax": "Total tax", "Amount $": rep.tax_cents / 100})
+            tcol.caption("By tax type")
+            tcol.dataframe(pd.DataFrame(tax_rows), use_container_width=True, hide_index=True)
+
+        # Per-shipment detail with every charge component as its own column
+        st.caption("Shipment detail — base, each accessorial, and tax broken out")
         rows = []
         for inv in invoices:
             for s in inv.shipments:
-                rows.append({
+                bd = shipment_breakdown(s)
+                row = {
                     "Invoice": inv.invoice_number, "Tracking": s.tracking_number,
                     "Service": s.service, "Dest": s.dest_postal, "Country": s.dest_country,
                     "Billed wt": s.billed_weight, "Actual wt": s.actual_weight,
                     "Dims": (f"{s.length}x{s.width}x{s.height}" if s.length else ""),
-                    "Total $": s.total_charge_cents / 100,
-                    "Review": "⚠️" if s.field_confidence.get("total_reconciled") != 1 else "",
-                })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, height=320)
+                    "Base $": bd["base"],
+                }
+                for k in ACCESSORIAL_COLUMNS:
+                    row[ACCESSORIAL_LABELS[k] + " $"] = bd[k]
+                row["Tax $"] = bd["tax"]
+                row["Total $"] = bd["total"]
+                row["Review"] = "⚠️" if s.field_confidence.get("total_reconciled") != 1 else ""
+                rows.append(row)
+        df = pd.DataFrame(rows)
+        # Drop accessorial columns that are zero across the whole dataset, to keep it tidy.
+        for k in ACCESSORIAL_COLUMNS:
+            col = ACCESSORIAL_LABELS[k] + " $"
+            if col in df and df[col].abs().sum() == 0:
+                df = df.drop(columns=[col])
+        st.dataframe(df, use_container_width=True, height=340)
+        st.download_button("⬇ Download shipment detail (CSV)", df.to_csv(index=False).encode(),
+                           file_name="freight-iq-shipment-detail.csv", mime="text/csv")
     else:
         st.info("Upload UPS invoice PDFs, or tick the sample-invoices box to explore.")
 

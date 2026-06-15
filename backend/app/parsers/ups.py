@@ -74,7 +74,8 @@ RE_INV_DATE = re.compile(r"Invoice Date\s+(?P<v>[A-Za-z]+ \d{1,2}, \d{4})")
 RE_DUE_DATE = re.compile(r"Invoice Due Date\s+(?P<v>[A-Za-z]+ \d{1,2}, \d{4})")
 RE_ACCOUNT = re.compile(r"Account Number\s+(?P<v>\S+)")
 RE_AMOUNT_DUE = re.compile(rf"Amount due this period\s+(?:CAD\s+)?(?P<v>{_NUM})")
-RE_TAX = re.compile(rf"\bTax\b.*?(?P<v>{_NUM})")
+# Tax detail lines, e.g. "Total Taxes HST R105453328 82.19" / "Total Taxes GST ... 6.91"
+RE_TAX_LINE = re.compile(rf"Total Taxes\s+(?P<kind>GST|HST|QST|PST)\b.*?(?P<v>{_NUM})\s*$", re.M)
 
 # Accessorial name -> normalized type
 ACC_MAP = [
@@ -154,6 +155,9 @@ class UPSParser:
             inv.account_number = m.group("v")
         if m := RE_AMOUNT_DUE.search(full):
             inv.total_spend_cents = _cents(m.group("v"))
+        for tm in RE_TAX_LINE.finditer(full):
+            inv.taxes[tm.group("kind")] = inv.taxes.get(tm.group("kind"), 0) + _cents(tm.group("v"))
+        inv.tax_cents = sum(inv.taxes.values())
 
         inv.shipments = self._parse_shipments(pages)
         # Confidence: fraction of shipments whose Total reconciled.

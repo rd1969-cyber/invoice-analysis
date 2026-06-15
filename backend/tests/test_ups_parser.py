@@ -42,6 +42,14 @@ def test_reconciliation_rate_is_high():
     assert recon / total >= 0.90, f"only {recon}/{total} reconciled"
 
 
+def test_extracts_taxes_broken_out():
+    target = next(f for f in SAMPLES if "61146" in f)
+    [inv] = UPSParser().parse(target)
+    assert inv.taxes.get("GST") == 691      # $6.91
+    assert inv.taxes.get("HST") == 8219     # $82.19
+    assert inv.tax_cents == 8910            # $89.10 total
+
+
 def test_extracts_known_shipment_fields():
     """First shipment of invoice 61146 page 4 has known golden values."""
     target = next(f for f in SAMPLES if "61146" in f)

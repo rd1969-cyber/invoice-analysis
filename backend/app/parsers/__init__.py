@@ -52,6 +52,7 @@ class ParsedInvoice:
     currency: str = "CAD"
     total_spend_cents: int = 0
     tax_cents: int = 0
+    taxes: dict = field(default_factory=dict)  # {"GST": cents, "HST": cents, ...}
     shipments: list[ParsedShipment] = field(default_factory=list)
     confidence: float = 1.0
 
