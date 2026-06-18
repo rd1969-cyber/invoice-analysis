@@ -179,6 +179,11 @@ with st.sidebar:
         "Canpar": st.slider("Canpar rate ±%", -50, 30, 0, 1) / 100,
         "Purolator": st.slider("Purolator rate ±%", -50, 30, 0, 1) / 100,
     }
+
+    st.caption("UPS via your DAP (discount off the published charge on each invoice)")
+    ups_on = st.checkbox("Quote UPS from published − DAP discount", value=False)
+    ups_discount = (st.slider("UPS DAP discount % off published", 0, 80, 40, 1) / 100
+                    if ups_on else None)
     report_mode = st.radio("Report mode", ["internal", "customer"], format_func=str.title)
 
 # Apply fuel overrides to the module (single-user app; re-applied each run).
@@ -388,7 +393,7 @@ with tab_compare:
         st.info("Load rate cards in tab 2 first.")
     else:
         manual_costs = st.session_state.get("manual_costs") or {}
-        rows = build_rows(invoices, cards, manual_costs)
+        rows = build_rows(invoices, cards, manual_costs, ups_discount)
         records = rows_to_records(rows, target_savings, min_margin, margins)
         summary = summarize(records)
         if manual_costs:

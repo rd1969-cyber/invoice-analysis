@@ -37,7 +37,8 @@ class ParsedShipment:
     fuel_cents: int = 0
     accessorials: list[dict] = field(default_factory=list)  # {type, amount_cents, desc}
     tax_cents: int = 0
-    total_charge_cents: int = 0
+    total_charge_cents: int = 0          # net billed (what the customer pays)
+    total_published_cents: int = 0       # UPS published (list) charge before discount
     field_confidence: dict[str, float] = field(default_factory=dict)
     source_line_index: int | None = None
 

@@ -224,6 +224,7 @@ class UPSParser:
                 tm = RE_TOTAL.match(line)
                 if tm:
                     current.total_charge_cents = _cents(tm.group("billed"))
+                    current.total_published_cents = _cents(tm.group("pub"))
                     continue
 
                 if rm := RE_REF.search(line):

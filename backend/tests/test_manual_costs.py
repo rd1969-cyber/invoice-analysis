@@ -58,6 +58,32 @@ def test_per_component_margin_uses_quote_line_items():
     assert margin == sell - q.cost_cents
 
 
+def test_ups_dap_from_published():
+    s = ParsedShipment(tracking_number="1ZUPS", service="Standard",
+                       dest_postal="B4C4H2", dest_country="CA",
+                       actual_weight=2.0, billed_weight=2.0,
+                       total_charge_cents=4000, total_published_cents=10000)
+    inv = ParsedInvoice(invoice_number="I", carrier="UPS", shipments=[s])
+    # 50% DAP off $100 published -> $50 cost (above customer's $40 -> not winnable)
+    rows = build_rows([inv], cards={}, ups_discount=0.50)
+    r = rows[0]
+    assert r.my_carrier == "UPS(yours)"
+    assert r.my_cost_cents == 5000
+    assert r.is_high is True
+    # 70% DAP -> $30 cost, beats customer $40
+    r2 = build_rows([inv], cards={}, ups_discount=0.70)[0]
+    assert r2.my_cost_cents == 3000
+    assert r2.is_high is False
+
+
+def test_no_ups_quote_without_discount():
+    s = ParsedShipment(tracking_number="X", dest_postal="B4C4H2", dest_country="CA",
+                       actual_weight=1.0, total_charge_cents=4000, total_published_cents=10000)
+    inv = ParsedInvoice(invoice_number="I", carrier="UPS", shipments=[s])
+    rows = build_rows([inv], cards={}, ups_discount=None)
+    assert "UPS(yours)" not in rows[0].carrier_costs
+
+
 def test_applicable_components_from_shipment():
     from app.rating.accessorials import applicable_components
     s = ParsedShipment(tracking_number="X", accessorials=[

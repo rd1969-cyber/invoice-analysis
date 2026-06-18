@@ -136,6 +136,7 @@ def build_rows(
     invoices: list[ParsedInvoice],
     cards: dict[str, RateCardData],
     manual_costs: dict[str, dict] | None = None,
+    ups_discount: float | None = None,
 ) -> list[ComparisonRow]:
     """Build comparison rows, quoting the cheapest carrier for each shipment.
 
@@ -143,6 +144,8 @@ def build_rows(
     {"DHL": ..., "Canpar": ..., "Purolator": ...}.
     ``manual_costs`` maps tracking number -> {"cost_cents", "carrier", "service"}
     to override the computed cost (manual costing / carriers with no rate card).
+    ``ups_discount`` (e.g. 0.40): if set, quotes "UPS(yours)" from each shipment's
+    published charge discounted by this amount (models UPS DAP off published).
     """
     from app.parsers.ups import _classify_scope
     from app.rating.accessorials import applicable_components
@@ -161,6 +164,16 @@ def build_rows(
             scope = _classify_scope(s.dest_postal or "", s.dest_country, s.service or "")
             acc = applicable_components(s)
             quotes = quote_all(_to_input(s, scope), cards, acc)
+
+            # UPS via your DAP discount, from the shipment's published charge.
+            if ups_discount is not None and s.total_published_cents:
+                from app.rating.engine import Quote
+                uq = Quote(our_carrier="UPS(yours)", our_service="UPS DAP", currency="CAD")
+                uq.add("BASE", "UPS published net of DAP",
+                       round(s.total_published_cents * (1 - ups_discount)),
+                       f"${s.total_published_cents/100:,.2f} published x (1-{ups_discount:.0%} DAP)")
+                quotes.append(uq)
+
             carrier_costs = {q.our_carrier: q.cost_cents for q in quotes}
             best = min(quotes, key=lambda q: q.cost_cents) if quotes else None
             my_cost = best.cost_cents if best else None

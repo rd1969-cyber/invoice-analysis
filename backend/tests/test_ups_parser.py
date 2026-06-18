@@ -62,4 +62,5 @@ def test_extracts_known_shipment_fields():
     assert s.base_charge_cents == 1988  # $19.88 net billed
     assert s.fuel_cents == 755  # $7.55
     assert s.total_charge_cents == 2743  # $27.43
+    assert s.total_published_cents == 7838  # $78.38 published (list)
     assert (s.length, s.width, s.height) == (11.0, 6.0, 4.0)
