@@ -44,6 +44,12 @@ class ComparisonRow:
     quote: Quote | None
     carrier_costs: dict[str, int] = None  # carrier -> cost cents (all carriers quoted)
     zone_basis: str = "n/a"  # 'exact' | 'estimated' | 'manual' | 'n/a'
+    origin_postal: str | None = None
+    dest_postal: str | None = None
+    actual_weight: float | None = None
+    billable_weight: float | None = None
+    dims: str = ""
+    weight_basis: str = ""  # 'dimensional' | 'actual' | '—'
 
     def __post_init__(self):
         if self.carrier_costs is None:
@@ -157,6 +163,26 @@ def build_rows(
         w = " ".join(q.warnings).upper()
         return "estimated" if ("ESTIMATED" in w or "PLACEHOLDER" in w) else "exact"
 
+    def _billable_and_basis(best, s):
+        """Return (billable_weight_lb, basis) for the winning carrier."""
+        from app.rating.dim import billable_weight_lb
+
+        actual = s.actual_weight
+        carrier = best.our_carrier if best else None
+        if best is None or carrier in ("UPS(yours)", "Manual"):
+            # No carrier DIM math available — infer from the invoice's billed weight.
+            billable = s.billed_weight or actual
+            if actual and s.billed_weight and s.billed_weight > actual:
+                basis = "dimensional"
+            elif actual:
+                basis = "actual"
+            else:
+                basis = "—"
+            return billable, basis
+        bw, note = billable_weight_lb(carrier, best.our_service, actual or s.billed_weight,
+                                      s.length, s.width, s.height)
+        return bw, ("dimensional" if "-> DIM" in note else "actual")
+
     manual_costs = manual_costs or {}
     rows: list[ComparisonRow] = []
     for inv in invoices:
@@ -190,6 +216,9 @@ def build_rows(
                 carrier_costs = {**carrier_costs, my_carrier: my_cost}
                 zone_basis = "manual"
 
+            billable, wbasis = _billable_and_basis(best, s)
+            dims = (f"{s.length:g}x{s.width:g}x{s.height:g}"
+                    if None not in (s.length, s.width, s.height) else "")
             rows.append(
                 ComparisonRow(
                     tracking=s.tracking_number or "-",
@@ -202,6 +231,12 @@ def build_rows(
                     quote=best,
                     carrier_costs=carrier_costs,
                     zone_basis=zone_basis,
+                    origin_postal=inv.origin_postal,
+                    dest_postal=s.dest_postal,
+                    actual_weight=s.actual_weight,
+                    billable_weight=billable,
+                    dims=dims,
+                    weight_basis=wbasis,
                 )
             )
     return rows
@@ -276,6 +311,12 @@ def rows_to_records(
             "tracking": r.tracking,
             "competitor_service": r.service,
             "scope": r.scope,
+            "pickup": r.origin_postal or "",
+            "delivery": r.dest_postal or "",
+            "actual_wt": r.actual_weight,
+            "billable_wt": r.billable_weight,
+            "dims": r.dims,
+            "weight_basis": r.weight_basis,
             "competitor_pays": r.competitor_pays_cents / 100,
             "my_carrier": r.my_carrier or "",
             "my_service": r.my_service or "",

@@ -120,15 +120,17 @@ def build_workbook(records: list[dict], summary: dict, mode: str, settings: dict
     basis = settings.get("pricing_basis", "beat")  # 'beat' or 'costplus'
     if mode == "internal":
         # Full picture: every carrier's cost side by side + BOTH pricing models.
-        headers = ["Tracking", "Competitor svc", "Scope", "They pay",
+        headers = ["Tracking", "Pickup", "Delivery", "Actual wt", "Billable wt", "Dims",
+                   "Wt basis", "Competitor svc", "Scope", "They pay",
                    "Purolator", "Canpar", "DHL", "Best", "My cost", "Difference", "Status",
                    "Beat sell", "Beat margin", "Beat %", "Margin sell", "Margin $", "Margin %"]
-        keys = ["tracking", "competitor_service", "scope", "competitor_pays",
+        keys = ["tracking", "pickup", "delivery", "actual_wt", "billable_wt", "dims",
+                "weight_basis", "competitor_service", "scope", "competitor_pays",
                 "Purolator_cost", "Canpar_cost", "DHL_cost", "my_carrier", "my_cost",
                 "difference", "status", "beat_sell", "beat_margin", "beat_margin_pct",
                 "mgn_sell", "mgn_margin", "mgn_margin_pct"]
-        money_cols = {4, 5, 6, 7, 9, 10, 12, 13, 15, 16}
-        pct_cols = {14, 17}
+        money_cols = {10, 11, 12, 13, 15, 16, 18, 19, 21, 22}
+        pct_cols = {20, 23}
         data = records
     else:
         headers = ["Tracking", "Service", "Current price", "Your InXpress price",
@@ -172,8 +174,9 @@ def build_workbook(records: list[dict], summary: dict, mode: str, settings: dict
                 cell.font = Font(name="Calibri", bold=True, color=_GREEN.upper())
         row += 1
 
-    widths = ({1: 20, 2: 15, 3: 15, 4: 9, 5: 10, 6: 9, 7: 9, 8: 10, 9: 9, 10: 10, 11: 8,
-               12: 10, 13: 11, 14: 7, 15: 10, 16: 11, 17: 7}
+    widths = ({1: 19, 2: 8, 3: 8, 4: 8, 5: 9, 6: 10, 7: 9, 8: 14, 9: 13, 10: 9, 11: 9,
+               12: 9, 13: 9, 14: 9, 15: 9, 16: 9, 17: 7, 18: 9, 19: 9, 20: 7, 21: 9, 22: 9,
+               23: 7}
               if mode == "internal" else {1: 20, 2: 18, 3: 13, 4: 17, 5: 11, 6: 9})
     _autofit(ws, widths)
     ws.freeze_panes = ws.cell(head_row + 1, 1)

@@ -49,6 +49,7 @@ class ParsedInvoice:
     invoice_date: str | None = None
     due_date: str | None = None
     account_number: str | None = None
+    origin_postal: str | None = None  # shipper/account postal (pickup)
     carrier: str | None = None
     currency: str = "CAD"
     total_spend_cents: int = 0

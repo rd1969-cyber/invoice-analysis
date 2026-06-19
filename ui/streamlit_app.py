@@ -429,9 +429,10 @@ with tab_compare:
                               save_k: "you_save", "my_carrier": "carrier"})
             st.dataframe(view, width="stretch", height=360, hide_index=True)
         else:
-            cols = ["tracking", "scope", "my_carrier", "zone_basis", "competitor_pays", "my_cost",
-                    "difference", "status", "beat_sell", "beat_margin", "beat_margin_pct",
-                    "mgn_sell", "mgn_margin", "mgn_margin_pct"]
+            cols = ["tracking", "scope", "pickup", "delivery", "actual_wt", "billable_wt",
+                    "dims", "weight_basis", "my_carrier", "zone_basis", "competitor_pays",
+                    "my_cost", "difference", "status", "beat_sell", "beat_margin",
+                    "beat_margin_pct", "mgn_sell", "mgn_margin", "mgn_margin_pct"]
 
             def _style(r):
                 if r.get("status") == "HIGH":
@@ -447,9 +448,10 @@ with tab_compare:
         # ---- All carriers side by side ---- #
         st.markdown("**All carriers side by side** — every carrier's cost per lane (cheapest wins)")
         carrier_cols = [c for c in df.columns if c.endswith("_cost") and c != "my_cost"]
-        side = df[["tracking", "scope", "zone_basis", "competitor_pays", *carrier_cols,
+        side = df[["tracking", "pickup", "delivery", "actual_wt", "billable_wt", "dims",
+                   "weight_basis", "scope", "zone_basis", "competitor_pays", *carrier_cols,
                    "my_carrier", "my_cost"]].rename(columns={"competitor_pays": "UPS_pays",
-                                                             "my_carrier": "cheapest"})
+                                                            "my_carrier": "cheapest"})
 
         def _hl_best(r):
             out = [""] * len(r)

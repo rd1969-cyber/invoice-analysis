@@ -66,6 +66,7 @@ RE_REF = re.compile(r"1st ref:\s*(?P<r1>\S+)(?:\s+2nd ref:\s*(?P<r2>.+))?")
 RE_ACCESSORIAL = re.compile(rf"^(?P<name>[A-Za-z][A-Za-z &/\-]+?)\s+(?P<nums>(?:{_NUM}\s*){{1,3}})$")
 RE_COUNTRY = re.compile(r"^(?P<cc>[A-Z]{2})$")
 RE_CA_POSTAL = re.compile(r"^[A-Z]\d[A-Z]\s*\d[A-Z]\d$")
+RE_CA_POSTAL_SEARCH = re.compile(r"[A-Z]\d[A-Z]\s?\d[A-Z]\d")
 RE_US_ZIP = re.compile(r"^\d{5}(?:-\d{4})?$")
 
 # Invoice header fields
@@ -153,6 +154,9 @@ class UPSParser:
             inv.due_date = m.group("v")
         if m := RE_ACCOUNT.search(full):
             inv.account_number = m.group("v")
+        # Pickup/origin postal = the account holder's address on page 1.
+        if pages and (om := RE_CA_POSTAL_SEARCH.search(pages[0])):
+            inv.origin_postal = om.group(0).replace(" ", "")
         if m := RE_AMOUNT_DUE.search(full):
             inv.total_spend_cents = _cents(m.group("v"))
         for tm in RE_TAX_LINE.finditer(full):
