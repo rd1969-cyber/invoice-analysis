@@ -1,0 +1,8 @@
+# Streamlit Community Cloud reads this (repo root) to build the app environment.
+# Runtime deps for ui/streamlit_app.py only. The FastAPI/DB/test deps live in
+# backend/requirements.txt and are NOT needed to run the hosted app.
+streamlit>=1.33
+pandas>=2.2
+pdfplumber>=0.11      # text-based PDF invoice extraction
+openpyxl>=3.1         # Excel rate-card read + report export
+xlrd>=2.0.1           # legacy .xls rate cards (OLE2)

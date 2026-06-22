@@ -38,3 +38,4 @@ Thumbs.db
 # Streamlit run logs
 .streamlit_run.log
 .streamlit_err.log
+streamlit_test.log
