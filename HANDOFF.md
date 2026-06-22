@@ -95,6 +95,18 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" | ? { $_.CommandLine -
 4. Other (non-UPS) invoice examples → need new parsers.
 5. Real DHL invoice → confirm if DHL card already includes their discount.
 
+## Deployment (Streamlit Community Cloud — free)
+- GitHub remote: **https://github.com/rd1969-cyber/invoice-analysis** (private), branch `main`.
+- Root `requirements.txt` holds the lean runtime deps (streamlit/pandas/pdfplumber/
+  openpyxl/xlrd) — Streamlit Cloud reads this. `backend/requirements.txt` keeps the
+  full FastAPI/DB/test set, NOT needed by the hosted app.
+- App self-injects `backend/` onto `sys.path` (streamlit_app.py top), so no PYTHONPATH
+  needed on the cloud. Main file path for deploy: `ui/streamlit_app.py`.
+- Deploy at https://share.streamlit.io → New app → repo `rd1969-cyber/invoice-analysis`,
+  branch `main`, main file `ui/streamlit_app.py`, Advanced → Python 3.12.
+- Restrict viewers via app **Settings → Sharing** (email allow-list).
+- Real customer data (samples/, reports/, *.db) is gitignored — keep it that way.
+
 ## Possible next steps
-Deploy to a private link (Streamlit Cloud); PDF/PPTX exec report; wire DB
-persistence; FedEx/Purolator/DHL invoice parsers; DHL international country→zone map.
+PDF/PPTX exec report; wire DB persistence; FedEx/Purolator/DHL invoice parsers;
+DHL international country→zone map.
