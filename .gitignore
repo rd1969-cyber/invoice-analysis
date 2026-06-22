@@ -15,8 +15,10 @@ samples/invoices/*
 samples/rate_cards/*
 !samples/**/README.md
 uploads/
-reports/                 # generated reports contain real shipment data
-assets/brand/*.docx      # brand source doc (constants live in app/brand.py)
+# generated reports contain real shipment data
+reports/
+# brand source doc (constants live in app/brand.py)
+assets/brand/*.docx
 # Logos ARE committed (app needs them); only ignore other extracted media.
 
 # Streamlit
