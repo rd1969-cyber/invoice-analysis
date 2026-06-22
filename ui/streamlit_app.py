@@ -48,6 +48,9 @@ DEFAULT_CARDS = [
 
 st.set_page_config(page_title=f"{brand.APP_NAME} — InXpress", page_icon="📦", layout="wide")
 
+# --- TEMPORARY diagnostic marker (remove once the blank-page issue is resolved) ---
+st.error("🔧 DIAGNOSTIC: app script is executing — reached the top of streamlit_app.py.")
+
 
 # --------------------------------------------------------------------------- #
 # Branding
@@ -475,3 +478,6 @@ with tab_compare:
             data=xlsx, file_name=f"freight-iq-{report_mode}-report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
+# --- TEMPORARY diagnostic marker (remove once the blank-page issue is resolved) ---
+st.success("✅ DIAGNOSTIC: app script reached the END — full page rendered successfully.")
