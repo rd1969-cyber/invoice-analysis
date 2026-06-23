@@ -96,6 +96,11 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" | ? { $_.CommandLine -
 5. Real DHL invoice → confirm if DHL card already includes their discount.
 
 ## Deployment (Streamlit Community Cloud — free)
+- **LIVE:** https://shipping-invoice-analysis-jorben.streamlit.app/ (set public/allow-list
+  via app → Settings → Sharing).
+- ⚠️ **Main file path MUST be `ui/streamlit_app.py`.** A deploy that points at
+  `backend/app/brand.py` (constants only, no UI) gives a silent BLANK page — this is
+  not editable after deploy, so delete + redeploy to fix. This cost a long debug once.
 - GitHub remote: **https://github.com/rd1969-cyber/invoice-analysis** (private), branch `main`.
 - Root `requirements.txt` holds the lean runtime deps (streamlit/pandas/pdfplumber/
   openpyxl/xlrd) — Streamlit Cloud reads this. `backend/requirements.txt` keeps the
