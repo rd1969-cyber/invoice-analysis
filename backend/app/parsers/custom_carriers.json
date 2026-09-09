@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Sameday Worldwide",
+    "mode": "parcel",
+    "id_type": "waybill number",
+    "dim_factor": "5000 cm3/kg",
+    "codes": "FS,RES,SIG,APPT",
+    "weight_unit": "LB",
+    "notes": ""
+  },
+  {
+    "name": "Vitran",
+    "mode": "freight",
+    "id_type": "PRO number",
+    "dim_factor": "N/A - LTL class-based",
+    "codes": "FS,APPT,DET,HST",
+    "weight_unit": "LB",
+    "notes": "Invoice shows origin and destination terminal codes, not full addresses."
+  }
+]
