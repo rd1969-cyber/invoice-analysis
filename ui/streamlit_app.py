@@ -202,8 +202,7 @@ tab_inv, tab_cards, tab_compare = st.tabs(["1 · Invoices", "2 · Rate cards", "
 
 # ---- Tab 1: invoices ------------------------------------------------------ #
 with tab_inv:
-       st.subheader("Upload competitor invoices")
-
+    st.subheader("Upload competitor invoices")
     from app.parsers.ai import (AIParser, CarrierProfile, all_carriers,
                                 get_carrier, save_custom_carrier)
 
