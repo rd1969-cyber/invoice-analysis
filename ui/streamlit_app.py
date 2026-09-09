@@ -196,9 +196,42 @@ tab_inv, tab_cards, tab_compare = st.tabs(["1 · Invoices", "2 · Rate cards", "
 
 # ---- Tab 1: invoices ------------------------------------------------------ #
 with tab_inv:
-    st.subheader("Upload competitor invoices")
-    uploads = st.file_uploader("UPS invoice PDFs", type=["pdf"], accept_multiple_files=True)
-    use_samples = st.checkbox("Use the sample invoices included with the app", value=not uploads)
+       st.subheader("Upload competitor invoices")
+
+    from app.parsers.ai import (AIParser, CarrierProfile, all_carriers,
+                                get_carrier, save_custom_carrier)
+
+    mode = st.radio("Invoice type", ["parcel", "freight"], horizontal=True,
+                    format_func=lambda m: "📦 Small parcel" if m == "parcel"
+                    else "🚛 Freight / LTL")
+    names = [c.name for c in all_carriers(mode)]
+    carrier_name = st.selectbox("Carrier", names,
+                                index=names.index("UPS") if "UPS" in names else 0)
+
+    with st.expander("➕ Add a carrier"):
+        a = st.columns(3)
+        n_name = a[0].text_input("Name", key="nc_name")
+        n_id = a[1].text_input("Shipment identifier", key="nc_id",
+                               placeholder="e.g. PRO number")
+        n_dim = a[2].text_input("DIM factor", key="nc_dim", placeholder="139 in3/lb")
+        n_codes = st.text_input("Known charge codes", key="nc_codes",
+                                placeholder="FUE,APPT,DET,HST")
+        n_notes = st.text_area("Notes for the extractor", key="nc_notes")
+        if st.button("Save carrier") and n_name.strip():
+            save_custom_carrier(CarrierProfile(n_name.strip(), mode, n_id, n_dim,
+                                               n_codes, notes=n_notes, custom=True))
+            st.success(f"Saved {n_name}.")
+            st.rerun()
+
+    prof = get_carrier(carrier_name)
+    if prof:
+        st.caption(f"ID: {prof.id_type} · DIM: {prof.dim_factor or '—'} · "
+                   f"Codes: {prof.codes or '—'}")
+
+    uploads = st.file_uploader("Invoice PDFs or CSVs", type=["pdf", "csv", "txt"],
+                               accept_multiple_files=True)
+    use_samples = st.checkbox("Use the sample invoices included with the app",
+                              value=not uploads)
 
     files: list[tuple[str, bytes]] = []
     if uploads:
@@ -208,7 +241,7 @@ with tab_inv:
                  for f in sorted(os.listdir(SAMPLES_INV)) if f.lower().endswith(".pdf")]
 
     if files:
-        invoices = parse_invoices(files)
+        invoices = parse_invoices(carrier_name, files)
         st.session_state["invoices"] = invoices
         rep: SpendReport = analyze(invoices)
         st.success(f"Parsed {len(files)} invoice(s) · {rep.shipment_count} shipments")
