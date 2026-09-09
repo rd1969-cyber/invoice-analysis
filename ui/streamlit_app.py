@@ -103,19 +103,25 @@ def inject_brand_css() -> None:
 # Cached compute
 # --------------------------------------------------------------------------- #
 @st.cache_data(show_spinner="Parsing invoices…")
-def parse_invoices(files: list[tuple[str, bytes]]) -> list:
-    parser = UPSParser()
+@st.cache_data(show_spinner="Parsing invoices…")
+def parse_invoices(carrier: str, files: list[tuple[str, bytes]]) -> list:
+    """UPS uses the deterministic parser; every other carrier goes through AI."""
+    from app.parsers.ai import AIParser
+
+    parser = UPSParser() if carrier == "UPS" else AIParser(carrier=carrier)
     invoices = []
     for name, data in files:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
+        suffix = os.path.splitext(name)[1].lower() or ".pdf"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tf:
             tf.write(data)
             path = tf.name
         try:
             invoices.extend(parser.parse(path))
+        except Exception as e:
+            st.error(f"{name}: {e}")
         finally:
             os.unlink(path)
     return invoices
-
 
 @st.cache_data(show_spinner="Loading rate cards…")
 def load_card_bytes(carrier: str, sheet: str, filename: str, data: bytes):
