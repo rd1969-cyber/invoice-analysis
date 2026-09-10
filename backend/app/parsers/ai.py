@@ -53,6 +53,8 @@ class CarrierProfile:
     codes: str = ""
     weight_unit: str = "LB"
     notes: str = ""
+    reseller: bool = False          # invoice layout is theirs, freight is someone else's
+    underlying: str = ""            # e.g. "UPS, Purolator" — carriers they resell
     custom: bool = False
 
 
@@ -76,10 +78,17 @@ PARCEL_CARRIERS = [
     CarrierProfile("netParcel", "parcel", "carrier tracking number (often UPS 1Z format)",
                    "139 in3/lb", "Residential Surcharge,Peak Season Surcharge,"
                    "Delivery Area Surcharge,Fuel,Address Correction,Declared Value,HST,GST",
-                   notes="netParcel is a RESELLER. The invoice header says netParcel but each "
-                         "shipment shows its own 'Carrier:' line (usually UPS) and that "
+                   reseller=True, underlying="UPS",
+                   notes="Each shipment block shows its own 'Carrier:' line and that "
                          "carrier's tracking number. Sender/Consignee appear as single "
                          "comma-separated address strings."),
+    CarrierProfile("Sameday Worldwide", "parcel",
+                   "underlying carrier's tracking number (usually UPS 1Z format)",
+                   "139 in3/lb", "FS,RES,DAS,SIG,APPT,Fuel,HST,GST",
+                   reseller=True, underlying="UPS",
+                   notes="Sameday's own invoice layout — it does NOT look like a UPS "
+                         "invoice. Charge descriptions are Sameday's wording, but the "
+                         "tracking numbers are the underlying carrier's."),
 ]
 
 FREIGHT_CARRIERS = [
@@ -252,13 +261,30 @@ The postal/ZIP almost always sits IMMEDIATELY BEFORE the state/province code:
 
 def _build_prompt(profile: CarrierProfile) -> str:
     notes = f"\nCARRIER NOTES: {profile.notes}" if profile.notes else ""
+    reseller_block = ""
+    if profile.reseller:
+        under = profile.underlying or "another carrier"
+        reseller_block = f"""
+
+RESELLER INVOICE — IMPORTANT
+{profile.name} is a RESELLER. The invoice layout is {profile.name}'s own and will NOT
+look like a {under} invoice — different columns, different wording, different structure.
+Do not expect the underlying carrier's format. Read the layout in front of you.
+- The freight is carried by {under}, so tracking numbers are in {under}'s format.
+- Each shipment block may name its own carrier on a "Carrier:" line. Use it if present.
+- Charge descriptions use {profile.name}'s wording, not {under}'s codes. Map by MEANING:
+  anything describing fuel is fuel, anything describing a residential or home delivery
+  is residential, anything describing a remote/extended/rural area is a delivery area
+  surcharge, and so on. Never skip a charge line just because the wording is unfamiliar.
+- The header total belongs to the whole invoice; each shipment has its own total."""
+
     return f"""You extract shipment data from freight invoices. Return ONLY valid JSON \
 starting with {{ and ending with }}. No markdown, no commentary.
 
 CARRIER: {profile.name} ({'small parcel' if profile.mode == 'parcel' else 'LTL freight'})
 SHIPMENT IDENTIFIER: {profile.id_type}
 DIM FACTOR: {profile.dim_factor or 'unknown'}
-KNOWN CHARGE CODES: {profile.codes or 'unknown'}{notes}
+KNOWN CHARGE CODES: {profile.codes or 'unknown'}{notes}{reseller_block}
 
 {SCHEMA}
 
