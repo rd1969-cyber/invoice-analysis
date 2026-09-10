@@ -32,7 +32,7 @@ import pdfplumber
 
 from app.parsers import ParsedInvoice, ParsedShipment
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 PAGES_PER_BATCH = 4
 MAX_TOKENS = 8000
 
@@ -432,6 +432,7 @@ class AIParser:
         seen: dict[str, ParsedShipment] = {}
         order: list[str] = []
         header_done = False
+        errors: list[str] = []
 
         batches = [
             pages[i:i + self.pages_per_batch]
@@ -448,6 +449,7 @@ class AIParser:
                 data = _call(system, instruction)
             except Exception as exc:  # noqa: BLE001 — one bad batch must not kill the file
                 inv.confidence = min(inv.confidence, 0.5)
+                errors.append(f"batch {n}/{len(batches)}: {type(exc).__name__}: {exc}")
                 print(f"[AIParser] batch {n}/{len(batches)} failed: {exc}")
                 continue
 
@@ -481,6 +483,22 @@ class AIParser:
                     "total_reconciled", 0
                 ):
                     seen[key] = ship  # keep the cleaner duplicate
+
+        # Surface failures instead of silently returning an empty invoice.
+        if not seen and errors:
+            raise RuntimeError(
+                f"Extraction failed for {os.path.basename(path)} using model "
+                f"'{MODEL}' — " + " | ".join(errors[:3])
+            )
+        if not seen:
+            chars = sum(len(p) for p in pages)
+            raise ValueError(
+                f"No shipments found in {os.path.basename(path)}. Read {chars:,} "
+                f"characters across {len(pages)} page(s) and called the model "
+                f"{len(batches)} time(s) with no errors — the text extracted but "
+                f"nothing matched the '{self.profile.name}' profile. Check the "
+                f"carrier selection."
+            )
 
         inv.shipments = [seen[k] for k in order]
         inv.tax_cents = sum(inv.taxes.values()) or sum(s.tax_cents for s in inv.shipments)
