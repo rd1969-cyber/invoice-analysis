@@ -306,14 +306,47 @@ CHARGE RULES
 # --------------------------------------------------------------------------- #
 # API call
 # --------------------------------------------------------------------------- #
+def _api_key() -> str:
+    """Look in the environment first, then Streamlit secrets.
+
+    Streamlit Cloud usually exports secrets as env vars, but not when the key
+    sits inside a [section] — reading st.secrets directly covers both cases.
+    Whitespace and stray quotes are stripped: pasting a key with a trailing
+    newline or wrapping quotes is the most common cause of a 401.
+    """
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not key:
+        try:
+            import streamlit as st
+
+            key = st.secrets.get("ANTHROPIC_API_KEY", "")
+        except Exception:  # noqa: BLE001 — not running under Streamlit
+            key = ""
+    return str(key).strip().strip('"').strip("'").strip()
+
+
+def key_fingerprint() -> str:
+    """Masked description of the key in use, safe to show in the UI."""
+    key = _api_key()
+    if not key:
+        return "no key found"
+    return f"{key[:14]}…{key[-4:]} ({len(key)} chars)"
+
+
 def _client():
     from anthropic import Anthropic
 
-    key = os.environ.get("ANTHROPIC_API_KEY")
+    key = _api_key()
     if not key:
         raise RuntimeError(
             "ANTHROPIC_API_KEY is not set. Add it to Streamlit secrets "
-            "(Settings -> Secrets) or your environment."
+            "(Settings -> Secrets) as a top-level key, not inside a [section]."
+        )
+    if not key.startswith("sk-ant-"):
+        raise RuntimeError(
+            f"The key found does not look like an Anthropic API key — it starts "
+            f"'{key[:8]}…'. Anthropic keys begin with 'sk-ant-'. Create one at "
+            f"console.anthropic.com under API Keys."
         )
     return Anthropic(api_key=key)
 
